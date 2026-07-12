@@ -840,6 +840,7 @@ function SettingsDialog({ mode, navigationSpeech, readTelemetry, onMode, onNavig
           {PIPER_VOICES.filter((voice) => !speechState.installedVoices.includes(voice.id)).map((voice) => <button key={voice.id} onClick={() => installVoice(voice.id)} disabled={Boolean(downloading)}><span><b>{voice.label}</b><small>{voice.description}</small></span><em>{downloading === voice.id ? (downloadProgress > 0 ? `${Math.round(downloadProgress * 100)}%` : 'Starting…') : 'Download'}</em></button>)}
           {PIPER_VOICES.every((voice) => speechState.installedVoices.includes(voice.id)) && <p>All recommended voices are installed on this device.</p>}
         </div>
+        {!speechState.piperReady && speechState.installedVoices.includes(speechState.voiceId) && <button className="repair-voice" onClick={() => installVoice(speechState.voiceId)} disabled={Boolean(downloading)}>{downloading === speechState.voiceId ? 'Repairing voice…' : 'Repair selected voice'}</button>}
         {speechError && <p className="speech-error" role="alert">{speechError}</p>}
         <div className="speech-sliders">
           <label>Rate <output>{speechState.rate.toFixed(2)}×</output><input type="range" min="0.75" max="1.35" step="0.05" value={speechState.rate} onChange={(event) => speechService.configure({ rate: event.target.value })}/></label>

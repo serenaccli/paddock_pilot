@@ -121,8 +121,10 @@ class SpeechService {
 
   async downloadVoice(voiceId, onProgress) {
     await this.initialize()
-    await this.callWorker('download', { voiceId }, onProgress)
-    if (!this.installedVoices.includes(voiceId)) this.installedVoices.push(voiceId)
+    const piper = await import('@mintplex-labs/piper-tts-web')
+    await piper.download(voiceId, onProgress)
+    this.installedVoices = await piper.stored()
+    if (!this.installedVoices.includes(voiceId)) throw new Error('Voice model was not saved')
     await this.setVoice(voiceId)
     return this.snapshot()
   }

@@ -1,4 +1,4 @@
-const CACHE = 'paddock-pilot-offline-v3'
+const CACHE = 'paddock-pilot-offline-v4'
 const CORE = [
   './',
   './piper/piper_phonemize.wasm',

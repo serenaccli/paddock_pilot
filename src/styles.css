@@ -139,3 +139,4 @@ h1 em { font-style:normal; color:var(--red); }
 @media (max-width:600px){.speech-sliders{grid-template-columns:1fr}.speech-settings{padding:11px}}
 .vision-controls button.vision-scan{opacity:.82}
 @media (max-width:700px){.vision-controls button.vision-scan{font-size:10px}}
+.repair-voice{width:100%;min-height:36px;border:1px solid var(--red);background:white;color:var(--red);margin-top:8px;font-size:8px;font-weight:800;cursor:pointer}.repair-voice:disabled{opacity:.6;cursor:wait}

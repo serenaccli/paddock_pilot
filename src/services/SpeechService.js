@@ -137,7 +137,10 @@ class SpeechService {
         await this.callWorker('init', { voiceId })
         this.piperReady = true
         this.engine = 'piper'
-      } catch { this.markFallback() }
+      } catch (error) {
+        console.error('Piper voice activation failed', error)
+        this.markFallback()
+      }
     } else {
       this.piperReady = false
       this.markFallback('Selected Piper voice is not installed')

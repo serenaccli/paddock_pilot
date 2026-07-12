@@ -9,6 +9,9 @@ import {
   LogIn, User, Eye, Keyboard, LogOut
 } from 'lucide-react'
 import './styles.css'
+import { AlbertParkMap } from './components/AlbertParkMap'
+import { destinationFacilityMap, facilityForCommand, venueFacilities } from './data/albertParkVenue'
+import { applyVoiceRoutingPreference, defaultRoutingPreferences, planVenueRoute } from './routing/venueRouter'
 
 const destinations = [
   { id: 'bathroom', name: 'Accessible bathroom', detail: 'East concourse · open', time: '4 min', distance: '318 m', icon: Accessibility, aliases: ['toilet', 'bathroom', 'restroom', 'loo'] },
@@ -193,6 +196,8 @@ function App() {
   const [voiceTranscript, setVoiceTranscript] = useState('')
   const [voiceError, setVoiceError] = useState('')
   const [gpsState, setGpsState] = useState({ status: 'idle', accuracy: null, latitude: null, longitude: null, simulated: true })
+  const [venueDestinationId, setVenueDestinationId] = useState('accessible-toilet-east')
+  const [routingPreferences, setRoutingPreferences] = useState(defaultRoutingPreferences)
   const timer = useRef(null)
   const recognitionRef = useRef(null)
   const gpsWatchRef = useRef(null)
@@ -203,6 +208,7 @@ function App() {
   const totalDistance = Number.parseInt(destination?.distance, 10) || 318
   const remaining = Math.max(52, totalDistance - step * Math.round(totalDistance / routeInstructions.length))
   const progress = navigating ? Math.min(88, 16 + step * 23) : 0
+  const venueRoute = useMemo(() => planVenueRoute('gate1', venueDestinationId, routingPreferences), [venueDestinationId, routingPreferences])
 
   const routeReason = useMemo(() => {
     const reasons = []
@@ -237,6 +243,7 @@ function App() {
     setRerouteInstructions(null)
     setHazard(false)
     const item = destinations.find((d) => d.id === id)
+    if (destinationFacilityMap[id]) setVenueDestinationId(destinationFacilityMap[id])
     say(`${item.name} selected. ${item.time} away.`)
   }
 
@@ -251,6 +258,26 @@ function App() {
     if (item.id === 'bathroom' || item.id === 'exit' || item.id === 'quiet' || item.id === 'medical') setCustomDestination(null)
     say(`Fetched ${item.name}. ${item.distance} away, approximately ${item.time}. ${item.detail}. Begin navigation?`)
     notify(`Fetched · ${item.name} · Begin navigation?`)
+  }
+
+  function chooseVenueFacility(facilityId) {
+    const facility = venueFacilities.find((item) => item.id === facilityId)
+    if (!facility) return
+    const route = planVenueRoute('gate1', facilityId, routingPreferences)
+    setVenueDestinationId(facilityId)
+    setSelected(`venue-${facilityId}`)
+    setCustomDestination({
+      id: `venue-${facilityId}`,
+      name: facility.name,
+      detail: `${facility.status} · ${facility.verified ? 'official reference' : 'not field verified'}`,
+      time: route?.unavailable ? 'Unavailable' : `${Math.ceil(route?.minutes || 0)} min`,
+      distance: route?.unavailable ? '—' : `${Math.round(route?.distance || 0)} m`,
+      routeType: facility.type === 'medical' ? 'medical' : facility.type === 'grandstand' ? 'grandstand' : facility.type.includes('toilet') ? 'bathroom' : 'exit',
+    })
+    setPendingNavigation(!route?.unavailable)
+    setRerouteInstructions(null)
+    if (route?.unavailable) say(route.reason)
+    else say(`${facility.name}. ${Math.round(route.distance)} metres, approximately ${route.minutes.toFixed(1)} minutes. ${facility.verified ? 'Shown on an official event reference.' : 'This location is not field verified.'} Begin navigation?`)
   }
 
   function stopGpsTracking() {
@@ -329,9 +356,58 @@ function App() {
       notify('Navigation cancelled')
       return
     }
+    if (command.includes('turn on low vision') || command.includes('enable low vision')) {
+      setMode('lowVision')
+      say('Low-vision assistance on. Camera safety features are available. GPS and the venue map remain the primary navigation source.')
+      return
+    }
+    if (command.includes('turn off low vision') || command.includes('disable low vision')) {
+      setMode('standard')
+      say('Low-vision assistance off. Standard voice navigation remains available.')
+      return
+    }
+    if (navigating && /stop navigation|end navigation/.test(command)) {
+      setNavigating(false)
+      stopGpsTracking()
+      say('Navigation stopped.')
+      return
+    }
+    if (command.includes('simplest route') || command.includes('fastest route') || command.includes('avoid stairs') || command.includes('avoid steep') || command.includes('fewer turns') || command.includes('close to assistance') || command.includes('prefer indoor') || command.includes('prefer shade') || command.includes('limit the walk')) {
+      const updated = applyVoiceRoutingPreference(command, routingPreferences)
+      setRoutingPreferences(updated)
+      const preferenceName = command.includes('fastest') ? 'fastest route' : command.includes('simplest') ? 'simplest route' : 'route preference'
+      say(`${preferenceName} selected. I will recalculate using the venue accessibility graph.`)
+      notify('Route preferences updated')
+      return
+    }
+    if (command.includes('route preview') || command.includes('preview route')) {
+      if (!venueRoute || venueRoute.unavailable) say(venueRoute?.reason || 'Select a venue destination first.')
+      else say(`Route preview to ${venueRoute.destination.name}. ${Math.round(venueRoute.distance)} metres, approximately ${venueRoute.minutes.toFixed(1)} minutes, ${venueRoute.turns} turns, and ${venueRoute.indoorTransitions} indoor transitions. Confidence is ${Math.round(venueRoute.confidence * 100)} percent.`)
+      return
+    }
+    if (command.includes('what is nearby') || command.includes('what is near me')) {
+      say('Near Gate 1: Jones Grandstand, the south medical centre, an emergency exit, and the south concourse junction. Some facility status is not live verified.')
+      return
+    }
+    if (command.includes('orientation') || command.includes('which way am i facing')) {
+      say('You are near Gate 1, facing approximately north toward the south concourse. GPS heading confidence is medium in this prototype.')
+      return
+    }
+    if (command.includes('request help') || command === 'help' || command.includes('find assistance')) {
+      setVenueDestinationId('assistance-hub')
+      say('The accessibility assistance hub is mapped inside the central precinct. Its event-day status is not live verified. I have prepared a route.')
+      return
+    }
+    const venueFacility = facilityForCommand(command)
+    if (venueFacility) {
+      chooseVenueFacility(venueFacility.id)
+      notify(`Mapped · ${venueFacility.name}`)
+      return
+    }
     const match = parseDestinationCommand(rawCommand)
     if (match) {
       if (command.includes('avoid crowd')) setPrefs((current) => ({ ...current, crowds: true }))
+      if (destinationFacilityMap[match.routeType || match.id]) setVenueDestinationId(destinationFacilityMap[match.routeType || match.id])
       setFetchedDestination(match)
       return
     }
@@ -435,13 +511,14 @@ function App() {
       ? <JourneyView mode={mode} speechEnabled={navigationSpeech} destination={destination} instructions={routeInstructions} step={step} remaining={remaining} progress={progress} paused={paused} hazard={hazard} offline={offline} routeReason={routeReason} readTelemetry={readTelemetry} gpsState={gpsState} onPause={() => { setPaused(!paused); say(paused ? 'Navigation resumed.' : 'Navigation paused.') }} onAdvance={advance} onHazard={triggerHazard} onOffline={() => { setOffline(!offline); say(!offline ? 'Network lost. Continuing with cached venue data.' : 'Connection restored.') }} onRepeat={() => say(`${routeInstructions[step].title}. ${routeInstructions[step].detail}.`)} onEnd={() => { setNavigating(false); stopGpsTracking() }} />
     : lowVisionHome
       ? <LowVisionPilot listening={listening} transcript={voiceTranscript} error={voiceError} pendingNavigation={pendingNavigation} destination={destination} speechEnabled={navigationSpeech} onListen={startVoiceAssistant} onStart={beginNavigation} onSettings={() => setSettingsOpen(true)} onHazard={triggerHazard} />
-      : <StartView mode={mode} selected={selected} pendingNavigation={pendingNavigation} selectedDestination={destination} prefs={prefs} listening={listening} readTelemetry={readTelemetry} onSelect={chooseDestination} onPrefs={setPrefs} onListen={startVoiceAssistant} onCommand={handleVoiceCommand} onStart={beginNavigation} />
+      : <StartView mode={mode} selected={selected} pendingNavigation={pendingNavigation} selectedDestination={destination} prefs={prefs} listening={listening} readTelemetry={readTelemetry} venueDestinationId={venueDestinationId} venueRoute={venueRoute} routingPreferences={routingPreferences} onVenueDestination={chooseVenueFacility} onRoutingPreferences={setRoutingPreferences} onSelect={chooseDestination} onPrefs={setPrefs} onListen={startVoiceAssistant} onCommand={handleVoiceCommand} onStart={beginNavigation} />
 
   return (
     <div className={`app-shell ${lowVisionHome ? 'low-vision-shell' : ''}`}>
       {!lowVisionHome && <Header mode={mode} screen={screen} menuOpen={menuOpen} readTelemetry={readTelemetry} onSettings={() => setSettingsOpen(true)} onMenu={() => setMenuOpen(!menuOpen)} onNavigate={() => { setScreen('navigate'); setMenuOpen(false) }} onOperator={() => { setScreen('operator'); setMenuOpen(false) }} />}
       {!lowVisionHome && menuOpen && <MobileMenu screen={screen} onNavigate={() => { setScreen('navigate'); setMenuOpen(false) }} onOperator={() => { setScreen('operator'); setMenuOpen(false) }} />}
       <main id="main">{content}</main>
+      <ModeToggle mode={mode} onChange={(nextMode) => { setMode(nextMode); say(nextMode === 'lowVision' ? 'Low-vision assistance on.' : 'Low-vision assistance off. Standard voice navigation remains available.') }}/>
       {settingsOpen && <SettingsDialog mode={mode} navigationSpeech={navigationSpeech} readTelemetry={readTelemetry} onMode={setMode} onNavigationSpeech={(value) => { setNavigationSpeech(value); if (value) speak('Navigation text to speech on.') }} onReadTelemetry={(value) => { setReadTelemetry(value); if (navigationSpeech) speak(value ? 'Race updates will be read aloud.' : 'Spoken race updates off.') }} onSignOut={() => { localStorage.removeItem('paddock-signed-in'); setSignedIn(false); setSettingsOpen(false) }} onClose={() => setSettingsOpen(false)} />}
       {toast && <div className="toast" role="status"><Check size={18} aria-hidden="true" />{toast}</div>}
     </div>
@@ -506,6 +583,13 @@ function VoiceAssistantDock({ listening, transcript, error, onListen, onCommand 
   </aside>
 }
 
+function ModeToggle({ mode, onChange }) {
+  const enabled = mode === 'lowVision'
+  return <button className={`low-vision-toggle ${enabled ? 'enabled' : ''}`} onClick={() => onChange(enabled ? 'standard' : 'lowVision')} aria-pressed={enabled} aria-label={`Low-vision assistance ${enabled ? 'on' : 'off'}. Press to turn ${enabled ? 'off' : 'on'}.`}>
+    <Eye/><span>{enabled ? 'Low vision on' : 'Low vision off'}</span>
+  </button>
+}
+
 function Header({ mode, screen, menuOpen, readTelemetry, onSettings, onMenu, onNavigate, onOperator }) {
   return <header className="topbar">
     <button className="brand" onClick={onNavigate} aria-label="Paddock Pilot home">
@@ -529,19 +613,19 @@ function MobileMenu({ screen, onNavigate, onOperator }) {
   </div>
 }
 
-function StartView({ mode, selected, pendingNavigation, selectedDestination, prefs, listening, readTelemetry, onSelect, onPrefs, onListen, onCommand, onStart }) {
+function StartView({ mode, selected, pendingNavigation, selectedDestination, prefs, listening, readTelemetry, venueDestinationId, venueRoute, routingPreferences, onVenueDestination, onRoutingPreferences, onSelect, onPrefs, onListen, onCommand, onStart }) {
   const [typedCommand, setTypedCommand] = useState('')
   return <div className="start-layout">
     <section className="hero-panel">
       <div className="eyebrow"><span>LIVE DEMO</span> ALBERT PARK · GATE 1</div>
       <h1>Your race day.<br/><em>On your terms.</em></h1>
       <p className="hero-copy">Audio-first guidance that anticipates crowds, adapts to hazards and keeps you confidently moving.</p>
-      {mode === 'lowVision' ? <button className={`talk-button ${listening ? 'listening' : ''}`} onClick={onListen} aria-pressed={listening}>
+      <button className={`talk-button ${listening ? 'listening' : ''}`} onClick={onListen} aria-pressed={listening}>
         <span className="mic-orbit"><Mic size={30} /></span>
         <span><b>{listening ? 'Listening…' : 'Ask Paddock Pilot'}</b><small>{listening ? 'Say your destination' : 'Press to speak'}</small></span>
         {listening && <span className="wave" aria-hidden="true"><i/><i/><i/><i/></span>}
-      </button> : <div className="standard-mode-note"><Navigation/><span><b>Standard navigator</b><small>Choose a destination below. Camera and persistent voice controls are off.</small></span></div>}
-      {mode === 'lowVision' && <div className="voice-example"><Volume2 size={18}/><span>Try: “Grandstand C”, “seat row H 14”, “nearest exit”, “bathroom” or “Fitzroy Street”.</span></div>}
+      </button>
+      <div className="voice-example"><Volume2 size={18}/><span>Try: “Find the nearest accessible toilet”, “use the simplest route”, or “turn on low-vision mode”.</span></div>
     </section>
 
     <section className="destination-panel" aria-labelledby="destinations-heading">
@@ -581,6 +665,8 @@ function StartView({ mode, selected, pendingNavigation, selectedDestination, pre
         <span>{selectedDestination ? selectedDestination.name : selected ? 'Route ready' : 'Choose a destination'} <ChevronRight size={18}/></span>
       </button>
     </section>
+
+    <AlbertParkMap route={venueRoute} destinationId={venueDestinationId} onDestination={onVenueDestination} preferences={routingPreferences} onPreferences={onRoutingPreferences}/>
 
     <aside className="trust-strip" aria-label="System capabilities">
       <div><ShieldCheck/><span><b>Privacy first</b><small>Camera stays on-device</small></span></div>
@@ -957,12 +1043,26 @@ const telemetryEvents = [
   { type: 'Timing', title: 'PIA improves to P2', detail: '+0.182 to session leader', time: '14:43:51', tone: 'green', icon: TrendingUp },
   { type: 'Weather', title: 'Light rain expected', detail: 'In approximately 12 minutes', time: '14:43:22', tone: 'blue', icon: CloudRain },
   { type: 'Session', title: 'Track status clear', detail: 'Green flag conditions restored', time: '14:42:57', tone: 'green', icon: Zap },
+  { type: 'Race control', title: 'DRS enabled', detail: 'Race control has enabled DRS for the session', time: '14:42:31', tone: 'green', icon: Flag },
+  { type: 'Timing', title: 'VER starts a flying lap', detail: 'Personal best first sector', time: '14:41:58', tone: 'blue', icon: Timer },
+  { type: 'Pit lane', title: 'RUS leaves the garage', detail: 'Medium tyres fitted for this run', time: '14:41:36', tone: 'green', icon: Zap },
+  { type: 'Timing', title: 'HAM moves into P5', detail: '0.438 seconds behind the leader', time: '14:41:11', tone: 'green', icon: TrendingUp },
+  { type: 'Race control', title: 'Track limits warning', detail: 'Lap time deleted at Turn 4', time: '14:40:47', tone: 'yellow', icon: Flag },
+  { type: 'Weather', title: 'Track temperature falling', detail: 'Down 1.8 degrees in the last ten minutes', time: '14:40:15', tone: 'blue', icon: CloudRain },
+  { type: 'Session', title: 'Five minutes remaining', detail: 'Qualifying session clock approaching zero', time: '14:39:55', tone: 'yellow', icon: Timer },
+  { type: 'Timing', title: 'ALO sets a personal best', detail: 'Improves by 0.214 seconds', time: '14:39:29', tone: 'green', icon: TrendingUp },
+  { type: 'Race control', title: 'Double yellow · Turn 11', detail: 'Car moving slowly near the exit', time: '14:39:03', tone: 'yellow', icon: Flag },
+  { type: 'Session', title: 'Pit lane queue forming', detail: 'Seven cars preparing for final runs', time: '14:38:42', tone: 'blue', icon: Radio },
 ]
 
 const driverNames = {
   NOR: 'Lando Norris',
   PIA: 'Oscar Piastri',
   LEC: 'Charles Leclerc',
+  VER: 'Max Verstappen',
+  RUS: 'George Russell',
+  HAM: 'Lewis Hamilton',
+  ALO: 'Fernando Alonso',
 }
 
 function expandDriverNames(text) {
@@ -978,7 +1078,11 @@ function TelemetryFeed({ compact = false, navigationPriority = false, operator =
     if (!running) return
     const id = setInterval(() => {
       setElapsed((value) => value + 1)
-      setActiveEvent((value) => (value + 1) % telemetryEvents.length)
+      setActiveEvent((current) => {
+        let next = current
+        while (next === current) next = Math.floor(Math.random() * telemetryEvents.length)
+        return next
+      })
     }, 5000)
     return () => clearInterval(id)
   }, [running])

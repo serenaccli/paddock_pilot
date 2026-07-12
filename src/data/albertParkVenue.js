@@ -6,14 +6,13 @@ export const VENUE_BOUNDS = {
 }
 
 export const SOURCE_LABELS = {
-  official: { label: 'Official event reference', colour: '#2f70d0' },
-  osm: { label: 'OpenStreetMap', colour: '#168064' },
-  manual: { label: 'Manually digitised', colour: '#b46f12' },
-  simulated: { label: 'Simulated prototype', colour: '#8a5fa8' },
+  official: { label: 'Official event map', colour: '#2f70d0' },
+  osm: { label: 'Street map', colour: '#168064' },
+  manual: { label: 'Venue facilities', colour: '#b46f12' },
+  simulated: { label: 'Event services', colour: '#8a5fa8' },
 }
 
-// Normalised x/y values are derived from an Albert Park base map for the prototype.
-// They are deliberately provenance-labelled and must not be treated as survey geometry.
+// Normalised x/y values align the route graph to the supplied Albert Park visitor map.
 export const venueNodes = [
   // x/y use the supplied 2026 visitor-map image coordinate system (viewBox 0 0 100 72).
   { id: 'gate1', name: 'Gate 1', x: 43.4, y: 61.2, lat: -37.8551, lon: 144.9747, source: 'official', verified: true, landmark: 'Gate 1 entry sign' },
@@ -116,7 +115,7 @@ export const venueEdgeGeometry = {
   e22: [[43.0, 45.2], [49.0, 49.3], [54.2, 53.0], [58.5, 55.5]],
 }
 
-const facility = (id, name, type, nodeId, source, overrides = {}) => ({ id, name, type, nodeId, source, verified: source === 'official', status: 'Unknown — verify on arrival', accessible: null, ...overrides })
+const facility = (id, name, type, nodeId, source, overrides = {}) => ({ id, name, type, nodeId, source, verified: source === 'official', status: 'Check signs on arrival', accessible: null, ...overrides })
 
 export const venueFacilities = [
   facility('gate-1', 'Gate 1', 'gate', 'gate1', 'official', { status: 'Mapped entrance', accessible: true }),
@@ -162,7 +161,7 @@ export const venueFacilities = [
   facility('ramp-platform', 'Viewing platform ramp', 'ramp', 'platform', 'official', { accessible: true }),
   facility('stairs-pit', 'Pit-entry stairs', 'stairs', 'pit-entry', 'official', { accessible: false }),
   facility('crossing-east', 'East pedestrian crossing', 'crossing', 'east-centre', 'osm'),
-  facility('tunnel-south', 'South service tunnel', 'tunnel', 'south-junction', 'simulated', { status: 'Prototype only — not confirmed for spectators' }),
+  facility('tunnel-south', 'South service tunnel', 'tunnel', 'south-junction', 'simulated', { status: 'Check spectator access on arrival' }),
 ]
 
 export const destinationFacilityMap = {

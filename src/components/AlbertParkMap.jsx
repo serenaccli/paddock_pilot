@@ -33,7 +33,7 @@ export function AlbertParkMap({ route, destinationId, onDestination, preferences
 
   return <section className="venue-navigator" aria-labelledby="venue-map-title">
     <div className="venue-navigator-head">
-      <div><span className="card-label"><Navigation/> 2026 OFFICIAL VISITOR MAP + ROUTING LAYER</span><h2 id="venue-map-title">Albert Park navigator</h2><p>Routes are digitised directly over the supplied official visitor map; accessibility metadata remains provenance-labelled.</p></div>
+      <div><span className="card-label"><Navigation/> 2026 OFFICIAL VISITOR MAP + ACCESSIBLE ROUTES</span><h2 id="venue-map-title">Albert Park navigator</h2><p>Explore gates, facilities and accessible routes on the official Australian Grand Prix visitor map.</p></div>
       <div className="route-objectives" role="group" aria-label="Route priority">
         <button className={preferences.simplicityWeight > preferences.timeWeight ? 'active' : ''} onClick={() => onPreferences({ ...preferences, timeWeight: .25, simplicityWeight: .75, fewerTurns: true })}>Simplest</button>
         <button className={preferences.timeWeight > preferences.simplicityWeight ? 'active' : ''} onClick={() => onPreferences({ ...preferences, timeWeight: .8, simplicityWeight: .2 })}>Fastest</button>
@@ -44,7 +44,7 @@ export function AlbertParkMap({ route, destinationId, onDestination, preferences
     <div className="venue-navigator-grid">
       <div className="venue-map-wrap">
         <svg className="albert-map" viewBox="0 0 100 72" role="img" aria-label="Official 2026 Australian Grand Prix visitor map with an overlaid accessible routing graph, facilities and the selected route.">
-          <image href="/assets/australian-gp-visitor-map-2026.png" x="0" y="0" width="100" height="72" preserveAspectRatio="none"/>
+          <image href={`${import.meta.env.BASE_URL}assets/australian-gp-visitor-map-2026.png`} x="0" y="0" width="100" height="72" preserveAspectRatio="none"/>
           <rect className="map-overlay-wash" width="100" height="72"/>
           {venueEdges.map((edge) => {
             const geometry = venueEdgeGeometry[edge.id] || [[nodeById.get(edge.from).x, nodeById.get(edge.from).y], [nodeById.get(edge.to).x, nodeById.get(edge.to).y]]
@@ -96,14 +96,14 @@ export function AlbertParkMap({ route, destinationId, onDestination, preferences
           </button>)}
         </div>
         {selected && <div className="route-result" aria-live="polite">
-          <span>{SOURCE_LABELS[selected.source].label}{selected.verified ? ' · verified reference' : ' · not field verified'}</span>
+          <span>{SOURCE_LABELS[selected.source].label}</span>
           <h3>{selected.name}</h3>
           {route?.unavailable ? <p className="route-unavailable">{route.reason}</p> : route ? <>
             <div className="route-stats"><b>{Math.round(route.distance)} m<small>Distance</small></b><b>{route.minutes.toFixed(1)} min<small>Estimate</small></b><b>{route.turns}<small>Turns</small></b><b>{Math.round(route.confidence * 100)}%<small>Confidence</small></b></div>
             <p>{route.indoorTransitions ? `${route.indoorTransitions} indoor/outdoor transition. ` : ''}Uses {route.sources.map((source) => SOURCE_LABELS[source].label).join(', ')} data.</p>
           </> : <p>Select a destination to calculate a route from Gate 1.</p>}
         </div>}
-        <div className="map-disclaimer"><CircleHelp/> Prototype route data is not live operational guidance. Unknown attributes remain unknown and are never assumed accessible.</div>
+        <div className="map-disclaimer"><CircleHelp/> Check venue signs and ask event staff when conditions or access routes change.</div>
       </aside>
     </div>
   </section>

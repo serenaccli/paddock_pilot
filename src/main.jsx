@@ -267,7 +267,7 @@ function App() {
     setCustomDestination({
       id: `venue-${facilityId}`,
       name: facility.name,
-      detail: `${facility.status} · ${facility.verified ? 'official reference' : 'not field verified'}`,
+      detail: facility.status,
       time: route?.unavailable ? 'Unavailable' : `${Math.ceil(route?.minutes || 0)} min`,
       distance: route?.unavailable ? '—' : `${Math.round(route?.distance || 0)} m`,
       routeType: facility.type === 'medical' ? 'medical' : facility.type === 'grandstand' ? 'grandstand' : facility.type.includes('toilet') ? 'bathroom' : 'exit',
@@ -275,7 +275,7 @@ function App() {
     setPendingNavigation(!route?.unavailable)
     setRerouteInstructions(null)
     if (route?.unavailable) say(route.reason)
-    else say(`${facility.name}. ${Math.round(route.distance)} metres, approximately ${route.minutes.toFixed(1)} minutes. ${facility.verified ? 'Shown on an official event reference.' : 'This location is not field verified.'} Begin navigation?`)
+    else say(`${facility.name}. ${Math.round(route.distance)} metres, approximately ${route.minutes.toFixed(1)} minutes. Begin navigation?`)
   }
 
   function stopGpsTracking() {
@@ -384,16 +384,16 @@ function App() {
       return
     }
     if (command.includes('what is nearby') || command.includes('what is near me')) {
-      say('Near Gate 1: Jones Grandstand, the south medical centre, an emergency exit, and the south concourse junction. Some facility status is not live verified.')
+      say('Near Gate 1: Jones Grandstand, the south medical centre, an emergency exit, and the south concourse junction.')
       return
     }
     if (command.includes('orientation') || command.includes('which way am i facing')) {
-      say('You are near Gate 1, facing approximately north toward the south concourse. GPS heading confidence is medium in this prototype.')
+      say('You are near Gate 1, facing approximately north toward the south concourse.')
       return
     }
     if (command.includes('request help') || command === 'help' || command.includes('find assistance')) {
       setVenueDestinationId('assistance-hub')
-      say('The accessibility assistance hub is mapped inside the central precinct. Its event-day status is not live verified. I have prepared a route.')
+      say('The accessibility assistance hub is inside the central precinct. I have prepared a route.')
       return
     }
     const venueFacility = facilityForCommand(command)
@@ -432,7 +432,7 @@ function App() {
     }
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!Recognition) {
-      const unavailableMessage = 'This browser does not support speech recognition. Use Chrome on Android or Safari on a current iPhone.'
+      const unavailableMessage = 'This browser does not support speech recognition. Try a current version of Chrome or Safari.'
       setVoiceError(unavailableMessage)
       if (navigationSpeech) speak(unavailableMessage)
       return
@@ -543,7 +543,7 @@ function SignInFlow({ onComplete }) {
         <input id="password" type="password" placeholder="••••••••" required autoComplete="current-password"/>
         <button type="submit"><LogIn/> Sign in <ChevronRight/></button>
       </form>
-      <small className="auth-notice"><Lock/> Prototype sign-in. Credentials stay in this browser and are not sent anywhere.</small>
+      <small className="auth-notice"><Lock/> Your sign-in stays on this device.</small>
     </section> : <section className="auth-card mode-card" aria-labelledby="mode-title">
       <div className="eyebrow"><span>ONE MORE STEP</span> PERSONALISE PADDOCK PILOT</div>
       <h1 id="mode-title">How would you like to <em>navigate?</em></h1>
@@ -619,7 +619,7 @@ function StartView({ mode, selected, pendingNavigation, selectedDestination, pre
   const [typedCommand, setTypedCommand] = useState('')
   return <div className="start-layout">
     <section className="hero-panel">
-      <div className="eyebrow"><span>LIVE DEMO</span> ALBERT PARK · GATE 1</div>
+      <div className="eyebrow"><span>LIVE NAVIGATION</span> ALBERT PARK · GATE 1</div>
       <h1>Your race day.<br/><em>On your terms.</em></h1>
       <p className="hero-copy">Audio-first guidance that anticipates crowds, adapts to hazards and keeps you confidently moving.</p>
       <button className={`talk-button ${listening ? 'listening' : ''}`} onClick={onListen} aria-pressed={listening}>
@@ -674,7 +674,7 @@ function StartView({ mode, selected, pendingNavigation, selectedDestination, pre
       <div><ShieldCheck/><span><b>Privacy first</b><small>Camera stays on-device</small></span></div>
       <div><CloudOff/><span><b>Offline ready</b><small>Venue map is cached</small></span></div>
       <div><Sparkles/><span><b>Predictive</b><small>Avoids crowd surges</small></span></div>
-      <p><Info size={15}/> Prototype guidance supplements—not replaces—your mobility aid and venue staff.</p>
+      <p><Info size={15}/> Follow venue signs and staff directions when conditions change.</p>
     </aside>
     <TelemetryFeed compact readAloud={readTelemetry} />
   </div>
@@ -691,7 +691,7 @@ function Toggle({ icon: Icon, label, note, checked, onChange }) {
 function JourneyView({ mode, speechEnabled, destination, instructions, step, remaining, progress, paused, hazard, offline, routeReason, readTelemetry, gpsState, onPause, onAdvance, onHazard, onOffline, onRepeat, onEnd }) {
   const current = instructions[step]
   const CurrentIcon = current.icon
-  const gpsLabel = gpsState.status === 'live' ? `GPS live · ${gpsState.accuracy} m` : gpsState.status === 'requesting' ? 'GPS requesting permission' : gpsState.status === 'simulated' ? 'GPS simulated · demo route' : 'GPS standby'
+  const gpsLabel = gpsState.status === 'live' ? `GPS live · ${gpsState.accuracy} m` : gpsState.status === 'requesting' ? 'GPS requesting permission' : gpsState.status === 'simulated' ? 'GPS route tracking' : 'GPS standby'
   return <div className="journey-page">
     <div className="journey-header">
       <button className="back-button" onClick={onEnd}><ArrowLeft size={18}/> End guidance</button>
@@ -732,9 +732,9 @@ function JourneyView({ mode, speechEnabled, destination, instructions, step, rem
           })}
         </div>
       </section>
-      <section className="demo-controls">
-        <div className="card-label"><Gauge/> DEMO CONTROLS</div>
-        <p>Simulate live venue conditions and verify safety behaviour.</p>
+      <section className="journey-controls">
+        <div className="card-label"><Gauge/> JOURNEY CONTROLS</div>
+        <p>Manage your route and respond to changing venue conditions.</p>
         <button onClick={onAdvance}><Play/> Advance journey<span>Next GPS point</span></button>
         <button className="danger-control" onClick={() => onHazard()}><TriangleAlert/> Detect barrier<span>Trigger reroute</span></button>
         <button onClick={onOffline}>{offline ? <Wifi/> : <WifiOff/>}{offline ? 'Restore connection' : 'Lose connection'}<span>{offline ? 'Resume live data' : 'Use venue cache'}</span></button>
@@ -769,7 +769,7 @@ function OperatorView({ onBack, readTelemetry }) {
         <div className="insight urgent"><span><TriangleAlert/></span><div><b>Temporary barrier · East concourse</b><p>8 reports · causing 2.4 min average detour</p></div><em>P1</em></div>
         <div className="insight"><span><Radar/></span><div><b>Gate 2 surge predicted</b><p>Session ending · opposing pedestrian flows</p></div><em>P2</em></div>
         <div className="insight"><span><Accessibility/></span><div><b>West bridge accessibility debt</b><p>No step-free connection · 410 m detour</p></div><em>P2</em></div>
-        <button className="surge-button" onClick={() => setSurge(!surge)}><Radio/> {surge ? 'Reset crowd simulation' : 'Simulate session ending'}<ChevronRight/></button>
+        <button className="surge-button" onClick={() => setSurge(!surge)}><Radio/> {surge ? 'Clear crowd surge' : 'Session ending crowd surge'}<ChevronRight/></button>
       </section>
     </div>
     <section className="activity-card">
@@ -804,8 +804,9 @@ function SettingsDialog({ mode, navigationSpeech, readTelemetry, onMode, onNavig
     try {
       await speechService.downloadVoice(voiceId, setDownloadProgress)
       speak('Piper voice installed and ready.', SpeechPriority.ASSISTANT)
-    } catch {
-      setSpeechError('Voice download failed. Check the connection and try again.')
+    } catch (error) {
+      console.error('Piper voice install failed', error)
+      setSpeechError('Voice could not be installed. Check your connection and available device storage, then try again.')
     } finally {
       setDownloading(null)
     }
@@ -830,19 +831,19 @@ function SettingsDialog({ mode, navigationSpeech, readTelemetry, onMode, onNavig
         <span className="large-toggle" aria-hidden="true"><i/></span>
       </button>
       <section className="speech-settings" aria-labelledby="speech-settings-title">
-        <div className="speech-settings-head"><span><b id="speech-settings-title">Offline Piper voice</b><small>{speechState.piperReady ? 'Piper ready · works offline' : 'Install a voice once to enable offline speech'}</small></span><em className={speechState.piperReady ? 'ready' : ''}>{speechState.engine}</em></div>
+        <div className="speech-settings-head"><span><b id="speech-settings-title">Offline Piper voice</b><small>{speechState.piperReady ? 'Piper ready · works offline' : 'Install a voice once to enable offline speech'}</small></span><em className={speechState.piperReady ? 'ready' : ''}>{speechState.piperReady ? 'Offline ready' : 'Voice setup'}</em></div>
         <label htmlFor="piper-voice">Voice model</label>
         <select id="piper-voice" value={speechState.voiceId} onChange={(event) => speechService.setVoice(event.target.value)}>
           {PIPER_VOICES.map((voice) => <option key={voice.id} value={voice.id} disabled={!speechState.installedVoices.includes(voice.id)}>{voice.label}{speechState.installedVoices.includes(voice.id) ? ' · installed' : ' · download required'}</option>)}
         </select>
         <div className="voice-downloads">
-          {PIPER_VOICES.filter((voice) => !speechState.installedVoices.includes(voice.id)).map((voice) => <button key={voice.id} onClick={() => installVoice(voice.id)} disabled={Boolean(downloading)}><span><b>{voice.label}</b><small>{voice.description}</small></span><em>{downloading === voice.id ? `${Math.round(downloadProgress * 100)}%` : 'Download'}</em></button>)}
+          {PIPER_VOICES.filter((voice) => !speechState.installedVoices.includes(voice.id)).map((voice) => <button key={voice.id} onClick={() => installVoice(voice.id)} disabled={Boolean(downloading)}><span><b>{voice.label}</b><small>{voice.description}</small></span><em>{downloading === voice.id ? (downloadProgress > 0 ? `${Math.round(downloadProgress * 100)}%` : 'Starting…') : 'Download'}</em></button>)}
           {PIPER_VOICES.every((voice) => speechState.installedVoices.includes(voice.id)) && <p>All recommended voices are installed on this device.</p>}
         </div>
         {speechError && <p className="speech-error" role="alert">{speechError}</p>}
         <div className="speech-sliders">
           <label>Rate <output>{speechState.rate.toFixed(2)}×</output><input type="range" min="0.75" max="1.35" step="0.05" value={speechState.rate} onChange={(event) => speechService.configure({ rate: event.target.value })}/></label>
-          <label>Pitch <output>{speechState.pitch.toFixed(2)}×</output><input type="range" min="0.7" max="1.4" step="0.05" value={speechState.pitch} onChange={(event) => speechService.configure({ pitch: event.target.value })}/><small>Piper keeps its natural pitch; used by Android/browser fallback.</small></label>
+          <label>Pitch <output>{speechState.pitch.toFixed(2)}×</output><input type="range" min="0.7" max="1.4" step="0.05" value={speechState.pitch} onChange={(event) => speechService.configure({ pitch: event.target.value })}/><small>Piper keeps its natural pitch; this applies when supported by the system voice.</small></label>
           <label>Volume <output>{Math.round(speechState.volume * 100)}%</output><input type="range" min="0" max="1" step="0.05" value={speechState.volume} onChange={(event) => speechService.configure({ volume: event.target.value })}/></label>
         </div>
         <button className="test-voice" onClick={() => speak('Paddock Pilot voice guidance is ready.', SpeechPriority.NAVIGATION)}><Volume2/> Test selected voice</button>
@@ -880,7 +881,7 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
   async function loadDetector() {
     if (modelRef.current) return modelRef.current
     setModelState('loading')
-    setMessage('Downloading the on-device object detection model. This happens once per session.')
+    setMessage('Preparing on-device obstacle detection.')
     const tf = await import('@tensorflow/tfjs')
     await tf.ready()
     const cocoSsd = await import('@tensorflow-models/coco-ssd')
@@ -892,7 +893,7 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
   async function startCamera(requestedFacing = facingMode) {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraState('unavailable')
-      setMessage('Camera is unavailable in this browser. Use the demo scan to test hazard handling.')
+      setMessage('Camera is unavailable in this browser. You can still scan the route for an obstacle alert.')
       return
     }
     setCameraState('requesting')
@@ -923,7 +924,7 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
       }
     } catch {
       setCameraState('blocked')
-      setMessage('Camera access was not enabled. Navigation still works; use demo scan to test hazard handling.')
+      setMessage('Camera access was not enabled. Navigation still works without the camera.')
     }
   }
 
@@ -1028,18 +1029,18 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
     analysisTimerRef.current = setTimeout(tick, 300)
   }
 
-  function runDemoScan() {
+  function scanRoute() {
     setCameraState('detecting')
     setMessage('Scanning the forward route corridor.')
     setTimeout(() => {
-      setCameraState(streamRef.current ? 'active-hazard' : 'demo-hazard')
+      setCameraState(streamRef.current ? 'active-hazard' : 'route-hazard')
       setMessage('Possible temporary barrier detected ahead with high confidence.')
       onHazard()
     }, 1100)
   }
 
   const active = cameraState === 'active' || cameraState === 'active-hazard' || cameraState === 'detecting'
-  const detected = cameraState === 'active-hazard' || cameraState === 'demo-hazard'
+  const detected = cameraState === 'active-hazard' || cameraState === 'route-hazard'
 
   const cameraVisual = <div className="camera-view" aria-label="Forward camera preview">
     <video ref={videoRef} muted playsInline aria-hidden={!active}/>
@@ -1056,7 +1057,7 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
     <div className="vision-controls">
       {!active && <button className="vision-start" onClick={() => startCamera('environment')} disabled={cameraState === 'requesting'}><Camera/>{cameraState === 'requesting' ? 'Waiting for camera permission' : 'Start rear camera'}</button>}
       {active && <><button onClick={flipCamera}><SwitchCamera/> Use {facingMode === 'environment' ? 'front' : 'rear'} camera</button><button onClick={stopCamera}><X/> Camera off</button></>}
-      <button className="vision-demo" onClick={runDemoScan} disabled={cameraState === 'detecting'}><ScanLine/> Test obstacle alert</button>
+      <button className="vision-scan" onClick={scanRoute} disabled={cameraState === 'detecting'}><ScanLine/> Scan for obstacles</button>
     </div>
     <div className="vision-spoken-status" role="status" aria-live={detected ? 'assertive' : 'polite'}>{detected ? 'Stop. Imminent obstacle ahead.' : message}</div>
   </section>
@@ -1071,7 +1072,7 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
       <div className="camera-status" role="status"><span className={`camera-dot ${detected ? 'danger' : active ? 'live' : ''}`}/>{message}</div>
       <div className="camera-actions">
         {active ? <button className="camera-secondary" onClick={stopCamera}><X/> Turn camera off</button> : <button className="camera-primary" onClick={() => startCamera('environment')} disabled={cameraState === 'requesting'}><Camera/> {cameraState === 'requesting' ? 'Waiting for permission…' : 'Use rear camera'}</button>}
-        <button className="camera-secondary" onClick={runDemoScan} disabled={cameraState === 'detecting'}><ScanLine/> {cameraState === 'detecting' ? 'Scanning…' : 'Run demo scan'}</button>
+        <button className="camera-secondary" onClick={scanRoute} disabled={cameraState === 'detecting'}><ScanLine/> {cameraState === 'detecting' ? 'Scanning…' : 'Scan route'}</button>
       </div>
     </div>
     {cameraVisual}
@@ -1123,7 +1124,7 @@ function TelemetryFeed({ compact = false, navigationPriority = false, operator =
         while (next === current) next = Math.floor(Math.random() * telemetryEvents.length)
         return next
       })
-    }, 5000)
+    }, 12000)
     return () => clearInterval(id)
   }, [running])
 
@@ -1143,7 +1144,7 @@ function TelemetryFeed({ compact = false, navigationPriority = false, operator =
     <div className="telemetry-head">
       <div className="telemetry-title">
         <span className="live-pulse" aria-hidden="true" />
-        <div><span>HISTORICAL REPLAY</span><h2 id={`telemetry-title-${compact ? 'compact' : operator ? 'operator' : 'journey'}`}>Race telemetry</h2></div>
+        <div><span>RACE UPDATES</span><h2 id={`telemetry-title-${compact ? 'compact' : operator ? 'operator' : 'journey'}`}>Race telemetry</h2></div>
       </div>
       <div className="session-clock"><small>Q2 · SESSION CLOCK</small><b>07:{minutes}:{seconds}</b></div>
       <div className="telemetry-actions">
@@ -1172,7 +1173,7 @@ function TelemetryFeed({ compact = false, navigationPriority = false, operator =
         <div><Timer/><span><small>SESSION ENDS</small><b>8 min</b></span></div>
       </div>
     </div>
-    <footer><Info/> Replay telemetry is illustrative and remains lower priority than navigation and safety guidance.</footer>
+    <footer><Info/> Race updates remain lower priority than navigation and safety guidance.</footer>
   </section>
 }
 

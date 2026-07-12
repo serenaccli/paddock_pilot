@@ -97,7 +97,7 @@ class SpeechService {
 
   markFallback(reason) {
     this.piperReady = false
-    this.engine = this.androidBridge() ? 'android' : ('speechSynthesis' in window ? 'browser' : 'unavailable')
+    this.engine = this.nativeBridge() ? 'system' : ('speechSynthesis' in window ? 'system' : 'unavailable')
     this.fallbackReason = reason || 'Piper could not initialise'
     this.emit()
   }
@@ -203,7 +203,7 @@ class SpeechService {
     this.playbackResolver = null
     this.audio?.pause()
     if (this.audio) this.audio.currentTime = 0
-    this.androidBridge()?.stop?.()
+    this.nativeBridge()?.stop?.()
     window.speechSynthesis?.cancel()
     if (resolveCurrent && this.current) this.current.resolve(false)
     this.cleanupAudio()
@@ -278,12 +278,12 @@ class SpeechService {
     })
   }
 
-  androidBridge() { return window.PaddockPilotAndroidTTS || window.AndroidTTS || null }
+  nativeBridge() { return window.PaddockPilotSystemTTS || null }
 
   async playFallback(text) {
-    const android = this.androidBridge()
-    if (android?.speak) {
-      const result = android.speak(text, JSON.stringify({ rate: this.config.rate, pitch: this.config.pitch, volume: this.config.volume }))
+    const nativeVoice = this.nativeBridge()
+    if (nativeVoice?.speak) {
+      const result = nativeVoice.speak(text, JSON.stringify({ rate: this.config.rate, pitch: this.config.pitch, volume: this.config.volume }))
       if (result?.then) await result
       else await new Promise((resolve) => setTimeout(resolve, Math.max(700, text.split(/\s+/).length * 330 / this.config.rate)))
       return

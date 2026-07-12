@@ -218,7 +218,7 @@ function App() {
   }, [])
   useEffect(() => {
     speechService.initialize()
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {})
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).then((registration) => registration.update()).catch(() => {})
   }, [])
   useEffect(() => localStorage.setItem('paddock-read-telemetry', String(readTelemetry)), [readTelemetry])
   useEffect(() => localStorage.setItem('paddock-navigation-speech', String(navigationSpeech)), [navigationSpeech])

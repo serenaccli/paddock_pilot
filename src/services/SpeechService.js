@@ -88,6 +88,7 @@ class SpeechService {
       this.engine = 'piper'
       this.preCacheFrequentPhrases()
     } catch (error) {
+      console.error('Piper initialisation failed', error)
       this.installedVoices = error.voices || await this.getStoredVoices().catch(() => [])
       this.markFallback(error.modelMissing ? 'Piper voice download required' : undefined)
     }

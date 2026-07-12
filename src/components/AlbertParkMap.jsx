@@ -30,6 +30,8 @@ export function AlbertParkMap({ route, destinationId, onDestination, preferences
   const [filter, setFilter] = useState('all')
   const visibleFacilities = useMemo(() => venueFacilities.filter((facility) => filter === 'all' || facility.type === filter), [filter])
   const selected = venueFacilities.find((facility) => facility.id === destinationId)
+  const routeStart = route?.nodes?.length ? nodeById.get(route.nodes[0]) : null
+  const routeEnd = route?.nodes?.length ? nodeById.get(route.nodes[route.nodes.length - 1]) : null
 
   return <section className="venue-navigator" aria-labelledby="venue-map-title">
     <div className="venue-navigator-head">
@@ -51,6 +53,8 @@ export function AlbertParkMap({ route, destinationId, onDestination, preferences
             return <path key={edge.id} className={`venue-edge ${edge.indoor ? 'indoor' : ''} ${edge.stairs ? 'stairs' : ''}`} d={pointsToPath(geometry)}/>
           })}
           {route?.nodes?.length > 1 && <><path className="selected-route-halo" d={routePath(route)}/><path className="selected-route" d={routePath(route)}/></>} 
+          {routeStart && <g className="route-marker route-marker-start" transform={`translate(${routeStart.x} ${routeStart.y})`} aria-hidden="true"><circle r="1.65"/><text y="-2.25">YOU</text></g>}
+          {routeEnd && <g className="route-marker route-marker-end" transform={`translate(${routeEnd.x} ${routeEnd.y})`} aria-hidden="true"><circle r="1.65"/><text y="-2.25">DESTINATION</text></g>}
           {visibleFacilities.map((facility) => {
             const node = nodeById.get(facility.nodeId)
             const colocated = visibleFacilities.filter((item) => item.nodeId === facility.nodeId)

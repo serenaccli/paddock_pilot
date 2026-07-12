@@ -628,6 +628,7 @@ function StartView({ mode, selected, pendingNavigation, selectedDestination, pre
         {listening && <span className="wave" aria-hidden="true"><i/><i/><i/><i/></span>}
       </button>
       <div className="voice-example"><Volume2 size={18}/><span>Try: “Find the nearest accessible toilet”, “use the simplest route”, or “turn on low-vision mode”.</span></div>
+      <button className="map-jump" onClick={() => document.getElementById('venue-map-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><MapPin/> Open Albert Park map <ChevronRight/></button>
     </section>
 
     <section className="destination-panel" aria-labelledby="destinations-heading">

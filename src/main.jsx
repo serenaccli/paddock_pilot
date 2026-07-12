@@ -718,7 +718,7 @@ function JourneyView({ mode, speechEnabled, destination, instructions, step, rem
 
     <section className="movement-strip" aria-label="GPS and camera monitoring">
       <div><MapPin/><span><b>{gpsLabel}</b><small>{gpsState.latitude && gpsState.longitude ? `${gpsState.latitude.toFixed(5)}, ${gpsState.longitude.toFixed(5)}` : 'Movement tracking starts with navigation'}</small></span></div>
-      <div><Camera/><span><b>Camera safety monitor</b><small>{mode === 'lowVision' ? 'Rear camera scanner available below' : 'Low-vision mode can enable camera hazard scanning'}</small></span></div>
+      <div><Camera/><span><b>Camera safety monitor</b><small>{mode === 'lowVision' ? 'Rear camera starts automatically below' : 'Low-vision mode can enable camera hazard scanning'}</small></span></div>
     </section>
 
     <div className="journey-grid">
@@ -740,7 +740,7 @@ function JourneyView({ mode, speechEnabled, destination, instructions, step, rem
         <button onClick={onOffline}>{offline ? <Wifi/> : <WifiOff/>}{offline ? 'Restore connection' : 'Lose connection'}<span>{offline ? 'Resume live data' : 'Use venue cache'}</span></button>
       </section>
     </div>
-    {mode === 'lowVision' && <CameraScanner speechEnabled={speechEnabled} onHazard={onHazard} />}
+    {mode === 'lowVision' && <CameraScanner autoStart speechEnabled={speechEnabled} onHazard={onHazard} />}
     <TelemetryFeed navigationPriority={!paused} readAloud={readTelemetry} />
   </div>
 }
@@ -856,13 +856,14 @@ function SettingsDialog({ mode, navigationSpeech, readTelemetry, onMode, onNavig
   </div>
 }
 
-function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
+function CameraScanner({ minimal = false, autoStart = false, speechEnabled, onHazard }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const modelRef = useRef(null)
   const analysisTimerRef = useRef(null)
-  const persistenceRef = useRef({ crowd: 0, object: 0, wall: 0 })
+  const autoStartAttemptedRef = useRef(false)
+  const persistenceRef = useRef({ crowd: 0, person: 0, vehicle: 0, object: 0, pole: 0, wall: 0 })
   const lastAlertRef = useRef(0)
   const [cameraState, setCameraState] = useState('off')
   const [facingMode, setFacingMode] = useState('environment')
@@ -872,6 +873,11 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
   const [message, setMessage] = useState('Camera is off. Navigation continues using location and venue data.')
 
   useEffect(() => () => stopStream(), [])
+  useEffect(() => {
+    if (!autoStart || autoStartAttemptedRef.current) return
+    autoStartAttemptedRef.current = true
+    startCamera('environment')
+  }, [autoStart])
 
   function stopStream() {
     clearTimeout(analysisTimerRef.current)
@@ -945,39 +951,66 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
     await startCamera(nextFacing)
   }
 
-  function detectWallLikeOcclusion(video) {
+  function detectSceneGeometry(video) {
     const canvas = canvasRef.current
-    if (!canvas || video.videoWidth === 0) return false
+    if (!canvas || video.videoWidth === 0) return null
     const width = 96
     const height = 72
     canvas.width = width
     canvas.height = height
     const context = canvas.getContext('2d', { willReadFrequently: true })
     context.drawImage(video, 0, 0, width, height)
-    const pixels = context.getImageData(26, 25, 44, 42).data
+    const pixels = context.getImageData(0, 0, width, height).data
+    const luminance = new Float32Array(width * height)
+    for (let index = 0; index < luminance.length; index += 1) {
+      const offset = index * 4
+      luminance[index] = pixels[offset] * .2126 + pixels[offset + 1] * .7152 + pixels[offset + 2] * .0722
+    }
     let sum = 0
     let sumSq = 0
     let edges = 0
-    let previous = 0
-    const samples = pixels.length / 4
-    for (let index = 0; index < pixels.length; index += 4) {
-      const luminance = pixels[index] * .2126 + pixels[index + 1] * .7152 + pixels[index + 2] * .0722
-      sum += luminance
-      sumSq += luminance * luminance
-      if (index > 0) edges += Math.abs(luminance - previous)
-      previous = luminance
+    let samples = 0
+    for (let y = 16; y < 68; y += 1) {
+      for (let x = 19; x < 77; x += 1) {
+        const value = luminance[y * width + x]
+        sum += value
+        sumSq += value * value
+        edges += Math.abs(value - luminance[y * width + x - 1])
+        samples += 1
+      }
     }
     const mean = sum / samples
     const variance = sumSq / samples - mean * mean
     const averageEdge = edges / samples
-    return variance < 310 && averageEdge < 13 && mean > 18 && mean < 235
+    if (variance < 270 && averageEdge < 11.5 && mean > 18 && mean < 235) return { type: 'wall', label: 'wall very close ahead', confidence: .72 }
+
+    let strongestPole = 0
+    let poleRows = 0
+    for (let x = 22; x < 74; x += 1) {
+      let contrast = 0
+      let matchingRows = 0
+      for (let y = 8; y < 67; y += 1) {
+        const centre = luminance[y * width + x]
+        const surround = (luminance[y * width + x - 4] + luminance[y * width + x + 4]) / 2
+        const difference = Math.abs(centre - surround)
+        contrast += difference
+        if (difference > 30) matchingRows += 1
+      }
+      const averageContrast = contrast / 59
+      if (averageContrast > strongestPole) {
+        strongestPole = averageContrast
+        poleRows = matchingRows
+      }
+    }
+    if (strongestPole > 27 && poleRows > 28) return { type: 'pole', label: 'pole or narrow obstruction ahead', confidence: .66 }
+    return null
   }
 
-  function persistentHazard(type, label, confidence) {
+  function persistentHazard(type, label, confidence, requiredFrames = 3) {
     for (const key of Object.keys(persistenceRef.current)) {
-      persistenceRef.current[key] = key === type ? persistenceRef.current[key] + 1 : 0
+      persistenceRef.current[key] = key === type ? (persistenceRef.current[key] || 0) + 1 : 0
     }
-    if (persistenceRef.current[type] < 3 || Date.now() - lastAlertRef.current < 12000) return
+    if (persistenceRef.current[type] < requiredFrames || Date.now() - lastAlertRef.current < 10000) return
     lastAlertRef.current = Date.now()
     persistenceRef.current[type] = 0
     const confidenceText = confidence >= .8 ? 'high confidence' : 'moderate confidence'
@@ -996,23 +1029,32 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
       const width = video.videoWidth
       const height = video.videoHeight
       const people = predictions.filter((item) => item.class === 'person' && item.score >= .55)
-      const corridorObjects = predictions.filter((item) => {
+      const enriched = predictions.map((item) => {
         const [x, y, boxWidth, boxHeight] = item.bbox
-        const centreX = (x + boxWidth / 2) / width
-        const bottom = (y + boxHeight) / height
-        const obstacleClasses = ['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'chair', 'bench', 'suitcase', 'backpack', 'dog']
-        return obstacleClasses.includes(item.class) && centreX > .24 && centreX < .76 && bottom > .48 && item.score >= .58
+        return { ...item, centreX: (x + boxWidth / 2) / width, bottom: (y + boxHeight) / height, area: boxWidth * boxHeight / (width * height), heightRatio: boxHeight / height }
       })
+      const closePeople = enriched.filter((item) => item.class === 'person' && item.score >= .55 && item.centreX > .16 && item.centreX < .84 && (item.area > .1 || item.heightRatio > .48 || item.bottom > .92))
+      const vehicleClasses = ['car', 'truck', 'bus', 'motorcycle', 'bicycle']
+      const vehicles = enriched.filter((item) => vehicleClasses.includes(item.class) && item.score >= .52 && item.bottom > .42 && (item.area > .025 || item.centreX > .18 && item.centreX < .82))
+      const obstacleClasses = ['chair', 'bench', 'suitcase', 'backpack', 'dog', 'umbrella', 'potted plant', 'dining table', 'traffic light', 'stop sign', 'fire hydrant', 'sports ball']
+      const corridorObjects = enriched.filter((item) => obstacleClasses.includes(item.class) && item.score >= .52 && item.centreX > .18 && item.centreX < .82 && item.bottom > .46 && (item.area > .018 || item.bottom > .82))
+      const geometryHazard = detectSceneGeometry(video)
       setDetections(predictions.filter((item) => item.score >= .55).slice(0, 12))
-      if (people.length >= 3) {
-        persistentHazard('crowd', `crowd of ${people.length} people`, Math.min(.95, Math.max(...people.map((item) => item.score))))
+      if (people.length >= 3 && people.some((item) => item.bbox[1] + item.bbox[3] > height * .58)) {
+        persistentHazard('crowd', `crowd of ${people.length} people close ahead`, Math.min(.95, Math.max(...people.map((item) => item.score))), 2)
+      } else if (closePeople.length) {
+        persistentHazard('person', 'person very close ahead', Math.max(...closePeople.map((item) => item.score)), 2)
+      } else if (vehicles.length) {
+        const nearestVehicle = vehicles.sort((a, b) => b.area - a.area)[0]
+        const roadLabel = vehicles.length > 1 ? 'vehicle traffic crossing the route' : `${nearestVehicle.class} close to the walking route`
+        persistentHazard('vehicle', roadLabel, nearestVehicle.score, 2)
       } else if (corridorObjects.length) {
-        const nearest = corridorObjects.sort((a, b) => b.bbox[2] * b.bbox[3] - a.bbox[2] * a.bbox[3])[0]
-        persistentHazard('object', `${nearest.class} blocking the route`, nearest.score)
-      } else if (detectWallLikeOcclusion(video)) {
-        persistentHazard('wall', 'solid obstruction or wall', .62)
+        const nearest = corridorObjects.sort((a, b) => b.area - a.area)[0]
+        persistentHazard('object', `${nearest.class} close ahead`, nearest.score, 2)
+      } else if (geometryHazard) {
+        persistentHazard(geometryHazard.type, geometryHazard.label, geometryHazard.confidence, geometryHazard.type === 'wall' ? 3 : 4)
       } else {
-        persistenceRef.current = { crowd: 0, object: 0, wall: 0 }
+        persistenceRef.current = { crowd: 0, person: 0, vehicle: 0, object: 0, pole: 0, wall: 0 }
         if (cameraState === 'active-hazard') setCameraState('active')
       }
       setFps(Math.max(1, Math.round(1000 / Math.max(1, performance.now() - startedAt))))

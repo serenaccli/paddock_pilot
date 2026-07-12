@@ -1,0 +1,811 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createRoot } from 'react-dom/client'
+import {
+  Accessibility, AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Check,
+  ChevronRight, CircleHelp, CloudOff, Gauge, Headphones, Info, MapPin,
+  Menu, Mic, Navigation, Pause, Play, Radar, Radio, Route, Settings2,
+  ShieldCheck, Sparkles, Timer, TriangleAlert, Volume2, VolumeX, Wifi, WifiOff, X,
+  Flag, CloudRain, TrendingUp, Zap, Camera, ScanLine, Lock, SwitchCamera,
+  LogIn, User, Eye, Keyboard, LogOut
+} from 'lucide-react'
+import './styles.css'
+
+const destinations = [
+  { id: 'toilet', name: 'Accessible toilet', detail: 'East concourse · open', time: '4 min', distance: '318 m', icon: Accessibility },
+  { id: 'grandstand', name: 'Grandstand 2', detail: 'Accessible platform', time: '6 min', distance: '470 m', icon: MapPin },
+  { id: 'quiet', name: 'Quiet area', detail: 'Low sensory zone', time: '3 min', distance: '215 m', icon: Headphones },
+  { id: 'medical', name: 'Medical station', detail: 'Staffed now', time: '5 min', distance: '390 m', icon: ShieldCheck },
+]
+
+const instructions = [
+  { title: 'Continue forward', detail: '35 metres along the east concourse', icon: Navigation },
+  { title: 'Turn left', detail: 'after the metal barrier', icon: ArrowLeft },
+  { title: 'Keep right', detail: 'at the water refill point', icon: ArrowRight },
+  { title: 'Destination ahead', detail: 'entrance on your left', icon: MapPin },
+]
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) return
+  window.speechSynthesis.cancel()
+  const utterance = new SpeechSynthesisUtterance(text)
+  utterance.rate = 0.96
+  utterance.pitch = 0.92
+  window.speechSynthesis.speak(utterance)
+}
+
+function App() {
+  const [signedIn, setSignedIn] = useState(() => localStorage.getItem('paddock-signed-in') === 'true')
+  const [mode, setMode] = useState(() => localStorage.getItem('paddock-mode') || 'lowVision')
+  const [screen, setScreen] = useState('navigate')
+  const [selected, setSelected] = useState(null)
+  const [prefs, setPrefs] = useState({ crowds: true, quiet: false, stairs: true })
+  const [listening, setListening] = useState(false)
+  const [navigating, setNavigating] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const [step, setStep] = useState(0)
+  const [hazard, setHazard] = useState(false)
+  const [offline, setOffline] = useState(false)
+  const [toast, setToast] = useState(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [readTelemetry, setReadTelemetry] = useState(() => localStorage.getItem('paddock-read-telemetry') !== 'false')
+  const [navigationSpeech, setNavigationSpeech] = useState(() => localStorage.getItem('paddock-navigation-speech') !== 'false')
+  const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [voiceError, setVoiceError] = useState('')
+  const timer = useRef(null)
+  const recognitionRef = useRef(null)
+
+  const destination = destinations.find((d) => d.id === selected)
+  const remaining = Math.max(52, 318 - step * 82)
+  const progress = navigating ? Math.min(88, 16 + step * 23) : 0
+
+  const routeReason = useMemo(() => {
+    const reasons = []
+    if (prefs.crowds) reasons.push('predicted Gate 2 congestion')
+    if (prefs.quiet) reasons.push('high-noise fan zone')
+    if (prefs.stairs) reasons.push('stairs at the west bridge')
+    return reasons.length ? `Avoids ${reasons.join(' and ')}` : 'Balances safety, confidence and distance'
+  }, [prefs])
+
+  useEffect(() => () => clearTimeout(timer.current), [])
+  useEffect(() => localStorage.setItem('paddock-read-telemetry', String(readTelemetry)), [readTelemetry])
+  useEffect(() => localStorage.setItem('paddock-navigation-speech', String(navigationSpeech)), [navigationSpeech])
+  useEffect(() => localStorage.setItem('paddock-mode', mode), [mode])
+
+  function say(text) {
+    if (navigationSpeech) speak(text)
+  }
+
+  function notify(message) {
+    setToast(message)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setToast(null), 3500)
+  }
+
+  function chooseDestination(id) {
+    setSelected(id)
+    const item = destinations.find((d) => d.id === id)
+    say(`${item.name} selected. ${item.time} away.`)
+  }
+
+  function beginNavigation() {
+    if (!destination) return
+    setNavigating(true)
+    setPaused(false)
+    setStep(0)
+    setHazard(false)
+    say(`${destination.name} is approximately ${destination.time} away. ${routeReason}. Start forward for 35 metres.`)
+  }
+
+  function handleVoiceCommand(rawCommand) {
+    const command = rawCommand.toLowerCase().trim()
+    setVoiceTranscript(rawCommand)
+    setVoiceError('')
+    const match = command.includes('toilet') || command.includes('bathroom') ? 'toilet'
+      : command.includes('quiet') ? 'quiet'
+      : command.includes('medical') || command.includes('first aid') ? 'medical'
+      : command.includes('grandstand') || command.includes('viewing') ? 'grandstand'
+      : null
+    if (match) {
+      const item = destinations.find((destinationItem) => destinationItem.id === match)
+      setSelected(match)
+      if (command.includes('avoid crowd')) setPrefs((current) => ({ ...current, crowds: true }))
+      say(`The nearest ${item.name} is ${item.distance} away, approximately ${item.time}. ${item.detail}.`)
+      notify(`Found · ${item.name} · ${item.time}`)
+      return
+    }
+    if (command.includes('where am i')) {
+      say('You are at Gate 1, near the east concourse entrance. Location confidence is high.')
+      notify('Gate 1 · East concourse entrance')
+      return
+    }
+    if (command.includes('repeat')) {
+      say(navigating ? `${instructions[step].title}. ${instructions[step].detail}.` : 'No active navigation instruction.')
+      return
+    }
+    setVoiceError('Try asking for the nearest toilet, quiet area, medical station or grandstand.')
+    say('I did not recognise that destination. Ask for the nearest toilet, quiet area, medical station or grandstand.')
+  }
+
+  async function startVoiceAssistant() {
+    if (listening) return
+    if (!window.isSecureContext) {
+      const secureMessage = 'Microphone access requires a secure HTTPS connection on this phone.'
+      setVoiceError(secureMessage)
+      if (navigationSpeech) speak(secureMessage)
+      return
+    }
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!Recognition) {
+      const unavailableMessage = 'This browser does not support speech recognition. Use Chrome on Android or Safari on a current iPhone.'
+      setVoiceError(unavailableMessage)
+      if (navigationSpeech) speak(unavailableMessage)
+      return
+    }
+    try {
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
+      permissionStream.getTracks().forEach((track) => track.stop())
+      const recognition = new Recognition()
+      recognition.lang = 'en-AU'
+      recognition.interimResults = false
+      recognition.continuous = false
+      recognition.maxAlternatives = 1
+      recognitionRef.current = recognition
+      recognition.onstart = () => { setListening(true); setVoiceError(''); window.speechSynthesis?.cancel() }
+      recognition.onspeechstart = () => setVoiceTranscript('I can hear you…')
+      recognition.onresult = (event) => handleVoiceCommand(event.results[0][0].transcript)
+      recognition.onnomatch = () => {
+        const noMatchMessage = 'I did not understand that. Try saying, where is the nearest toilet?'
+        setVoiceError(noMatchMessage)
+        if (navigationSpeech) speak(noMatchMessage)
+      }
+      recognition.onerror = (event) => {
+        const recognitionErrors = {
+          'not-allowed': 'Microphone permission is off. Enable it in your browser settings, then try again.',
+          'audio-capture': 'I cannot access the microphone. Check that another app is not using it.',
+          'no-speech': 'I did not hear any speech. Hold the button and try again.',
+          'network': 'Speech recognition needs a network connection in this browser.',
+        }
+        const errorMessage = recognitionErrors[event.error] || 'I could not hear that clearly. Please try again.'
+        setVoiceError(errorMessage)
+        if (navigationSpeech) speak(errorMessage)
+      }
+      recognition.onend = () => setListening(false)
+      recognition.start()
+    } catch {
+      const permissionMessage = 'Microphone permission was not enabled. Allow microphone access and press the voice button again.'
+      setListening(false)
+      setVoiceError(permissionMessage)
+      if (navigationSpeech) speak(permissionMessage)
+    }
+  }
+
+  function advance() {
+    if (paused) return
+    if (step >= instructions.length - 1) {
+      setNavigating(false)
+      setStep(0)
+      say('You have arrived at the accessible toilet. The entrance is on your left.')
+      notify('Destination reached')
+      return
+    }
+    const next = step + 1
+    setStep(next)
+    say(`${instructions[next].title}. ${instructions[next].detail}.`)
+  }
+
+  function triggerHazard(reason = 'temporary barrier') {
+    setHazard(true)
+    setStep(1)
+    say(`Possible ${reason} ahead. Stop. Rerouting. Turn left in six metres. The alternative adds about one minute.`)
+    notify(`Route updated · ${reason} avoided`)
+  }
+
+  if (!signedIn) return <SignInFlow onComplete={(selectedMode) => { setMode(selectedMode); setSignedIn(true); localStorage.setItem('paddock-signed-in', 'true'); localStorage.setItem('paddock-mode', selectedMode) }} />
+
+  const lowVisionHome = mode === 'lowVision' && screen === 'navigate'
+  const content = screen === 'operator'
+    ? <OperatorView readTelemetry={readTelemetry} onBack={() => setScreen('navigate')} />
+    : lowVisionHome
+      ? <LowVisionPilot listening={listening} transcript={voiceTranscript} error={voiceError} speechEnabled={navigationSpeech} onListen={startVoiceAssistant} onSettings={() => setSettingsOpen(true)} onHazard={triggerHazard} />
+    : navigating
+      ? <JourneyView mode={mode} speechEnabled={navigationSpeech} destination={destination} step={step} remaining={remaining} progress={progress} paused={paused} hazard={hazard} offline={offline} routeReason={routeReason} readTelemetry={readTelemetry} onPause={() => { setPaused(!paused); say(paused ? 'Navigation resumed.' : 'Navigation paused.') }} onAdvance={advance} onHazard={triggerHazard} onOffline={() => { setOffline(!offline); say(!offline ? 'Network lost. Continuing with cached venue data.' : 'Connection restored.') }} onRepeat={() => say(`${instructions[step].title}. ${instructions[step].detail}.`)} onEnd={() => setNavigating(false)} />
+      : <StartView mode={mode} selected={selected} prefs={prefs} listening={listening} readTelemetry={readTelemetry} onSelect={chooseDestination} onPrefs={setPrefs} onListen={startVoiceAssistant} onStart={beginNavigation} />
+
+  return (
+    <div className={`app-shell ${lowVisionHome ? 'low-vision-shell' : ''}`}>
+      {!lowVisionHome && <Header mode={mode} screen={screen} menuOpen={menuOpen} readTelemetry={readTelemetry} onSettings={() => setSettingsOpen(true)} onMenu={() => setMenuOpen(!menuOpen)} onNavigate={() => { setScreen('navigate'); setMenuOpen(false) }} onOperator={() => { setScreen('operator'); setMenuOpen(false) }} />}
+      {!lowVisionHome && menuOpen && <MobileMenu screen={screen} onNavigate={() => { setScreen('navigate'); setMenuOpen(false) }} onOperator={() => { setScreen('operator'); setMenuOpen(false) }} />}
+      <main id="main">{content}</main>
+      {settingsOpen && <SettingsDialog mode={mode} navigationSpeech={navigationSpeech} readTelemetry={readTelemetry} onMode={setMode} onNavigationSpeech={(value) => { setNavigationSpeech(value); if (value) speak('Navigation text to speech on.') }} onReadTelemetry={(value) => { setReadTelemetry(value); if (navigationSpeech) speak(value ? 'Race updates will be read aloud.' : 'Spoken race updates off.') }} onSignOut={() => { localStorage.removeItem('paddock-signed-in'); setSignedIn(false); setSettingsOpen(false) }} onClose={() => setSettingsOpen(false)} />}
+      {toast && <div className="toast" role="status"><Check size={18} aria-hidden="true" />{toast}</div>}
+    </div>
+  )
+}
+
+function SignInFlow({ onComplete }) {
+  const [stage, setStage] = useState('signIn')
+  const [email, setEmail] = useState('')
+  return <main className="auth-page">
+    <section className="auth-brand"><span className="brand-mark"><Navigation fill="currentColor"/></span><div><b>PADDOCK</b><strong>PILOT</strong></div></section>
+    {stage === 'signIn' ? <section className="auth-card" aria-labelledby="sign-in-title">
+      <div className="eyebrow"><span>WELCOME</span> ACCESSIBLE RACE-DAY NAVIGATION</div>
+      <h1 id="sign-in-title">Sign in to your <em>race day.</em></h1>
+      <p>Your preferences, audio settings and venue package will be ready when you return.</p>
+      <form onSubmit={(event) => { event.preventDefault(); setStage('mode') }}>
+        <label htmlFor="email">Email address</label>
+        <input id="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required autoComplete="email"/>
+        <label htmlFor="password">Password</label>
+        <input id="password" type="password" placeholder="••••••••" required autoComplete="current-password"/>
+        <button type="submit"><LogIn/> Sign in <ChevronRight/></button>
+      </form>
+      <small className="auth-notice"><Lock/> Prototype sign-in. Credentials stay in this browser and are not sent anywhere.</small>
+    </section> : <section className="auth-card mode-card" aria-labelledby="mode-title">
+      <div className="eyebrow"><span>ONE MORE STEP</span> PERSONALISE PADDOCK PILOT</div>
+      <h1 id="mode-title">How would you like to <em>navigate?</em></h1>
+      <p>You can change modes later in settings.</p>
+      <div className="mode-choices">
+        <button onClick={() => onComplete('lowVision')}><span><Eye/></span><div><b>Low-vision pilot</b><p>Voice runs the experience, with spoken answers, persistent microphone access and optional rear-camera hazard detection.</p><em>Audio-first · Camera optional</em></div><ChevronRight/></button>
+        <button onClick={() => onComplete('standard')}><span><Navigation/></span><div><b>Standard navigator</b><p>The full route, telemetry and operator experience without camera or persistent voice controls.</p><em>Visual navigation · No camera</em></div><ChevronRight/></button>
+      </div>
+      <button className="auth-back" onClick={() => setStage('signIn')}><ArrowLeft/> Back to sign in</button>
+    </section>}
+  </main>
+}
+
+function LowVisionPilot({ listening, transcript, error, speechEnabled, onListen, onSettings, onHazard }) {
+  return <div className="low-vision-pilot">
+    <section className={`assistant-zone ${listening ? 'listening' : ''}`} aria-labelledby="assistant-zone-title">
+      <button className="low-vision-settings" onClick={onSettings} aria-label="Open accessibility settings"><Settings2/></button>
+      <button className="assistant-hero-button" onClick={onListen} aria-pressed={listening}>
+        <span className="assistant-mic"><Mic/></span>
+        <span id="assistant-zone-title">{listening ? 'Listening' : 'Ask Paddock Pilot'}</span>
+        <small>{error || (transcript && transcript !== 'I can hear you…' ? `Last heard: ${transcript}` : listening ? 'Say “Where is the nearest…”' : 'Press, then ask where you need to go')}</small>
+      </button>
+    </section>
+    <CameraScanner minimal speechEnabled={speechEnabled} onHazard={onHazard}/>
+  </div>
+}
+
+function VoiceAssistantDock({ listening, transcript, error, onListen, onCommand }) {
+  const [typedCommand, setTypedCommand] = useState('')
+  return <aside className={`voice-dock ${listening ? 'listening' : ''}`} aria-label="Paddock Pilot voice assistant">
+    <button className="voice-dock-mic" onClick={onListen} aria-pressed={listening} aria-label={listening ? 'Listening for a destination' : 'Ask Paddock Pilot'}><Mic/></button>
+    <div className="voice-dock-copy"><b>{listening ? 'Listening…' : 'Ask Paddock Pilot'}</b><small>{error || (transcript ? `Last heard: “${transcript}”` : '“Where is the nearest toilet?”')}</small></div>
+    <form onSubmit={(event) => { event.preventDefault(); if (typedCommand.trim()) { onCommand(typedCommand); setTypedCommand('') } }}>
+      <Keyboard/>
+      <input value={typedCommand} onChange={(event) => setTypedCommand(event.target.value)} aria-label="Type a question for Paddock Pilot" placeholder="Type a destination…"/>
+      <button type="submit" aria-label="Send typed question"><ChevronRight/></button>
+    </form>
+  </aside>
+}
+
+function Header({ mode, screen, menuOpen, readTelemetry, onSettings, onMenu, onNavigate, onOperator }) {
+  return <header className="topbar">
+    <button className="brand" onClick={onNavigate} aria-label="Paddock Pilot home">
+      <span className="brand-mark"><Navigation size={20} fill="currentColor" /></span>
+      <span><b>PADDOCK</b><strong>PILOT</strong></span>
+    </button>
+    <nav aria-label="Primary navigation">
+      <button className={screen === 'navigate' ? 'active' : ''} onClick={onNavigate}>Navigation</button>
+      <button className={screen === 'operator' ? 'active' : ''} onClick={onOperator}>Operator view</button>
+    </nav>
+    <div className="system-status"><span className="status-dot" /> {mode === 'lowVision' ? 'Low-vision pilot' : 'Standard navigator'}</div>
+    <button className="settings-button" onClick={onSettings} aria-label={`Settings. Spoken race updates ${readTelemetry ? 'on' : 'off'}`}><Settings2/><span>Settings</span><i className={readTelemetry ? 'on' : ''}>{readTelemetry ? 'Audio on' : 'Audio off'}</i></button>
+    <button className="icon-button menu-button" onClick={onMenu} aria-label={menuOpen ? 'Close menu' : 'Open menu'}>{menuOpen ? <X /> : <Menu />}</button>
+  </header>
+}
+
+function MobileMenu({ screen, onNavigate, onOperator }) {
+  return <div className="mobile-menu">
+    <button className={screen === 'navigate' ? 'active' : ''} onClick={onNavigate}>Navigation <ChevronRight /></button>
+    <button className={screen === 'operator' ? 'active' : ''} onClick={onOperator}>Operator view <ChevronRight /></button>
+  </div>
+}
+
+function StartView({ mode, selected, prefs, listening, readTelemetry, onSelect, onPrefs, onListen, onStart }) {
+  return <div className="start-layout">
+    <section className="hero-panel">
+      <div className="eyebrow"><span>LIVE DEMO</span> ALBERT PARK · GATE 1</div>
+      <h1>Your race day.<br/><em>On your terms.</em></h1>
+      <p className="hero-copy">Audio-first guidance that anticipates crowds, adapts to hazards and keeps you confidently moving.</p>
+      {mode === 'lowVision' ? <button className={`talk-button ${listening ? 'listening' : ''}`} onClick={onListen} aria-pressed={listening}>
+        <span className="mic-orbit"><Mic size={30} /></span>
+        <span><b>{listening ? 'Listening…' : 'Ask Paddock Pilot'}</b><small>{listening ? 'Say your destination' : 'Press to speak'}</small></span>
+        {listening && <span className="wave" aria-hidden="true"><i/><i/><i/><i/></span>}
+      </button> : <div className="standard-mode-note"><Navigation/><span><b>Standard navigator</b><small>Choose a destination below. Camera and persistent voice controls are off.</small></span></div>}
+      {mode === 'lowVision' && <div className="voice-example"><Volume2 size={18}/><span>Try: “Where is the nearest accessible toilet?”</span></div>}
+    </section>
+
+    <section className="destination-panel" aria-labelledby="destinations-heading">
+      <div className="section-heading">
+        <div><span className="section-number">01</span><h2 id="destinations-heading">Where are you heading?</h2></div>
+        <button className="text-button"><CircleHelp size={16}/> Voice commands</button>
+      </div>
+      <div className="destination-grid">
+        {destinations.map((item) => {
+          const Icon = item.icon
+          return <button key={item.id} className={`destination-card ${selected === item.id ? 'selected' : ''}`} onClick={() => onSelect(item.id)} aria-pressed={selected === item.id}>
+            <span className="destination-icon"><Icon size={23}/></span>
+            <span className="destination-info"><b>{item.name}</b><small>{item.detail}</small></span>
+            <span className="destination-meta"><b>{item.time}</b><small>{item.distance}</small></span>
+            <span className="select-indicator">{selected === item.id ? <Check size={15}/> : <ChevronRight size={18}/>}</span>
+          </button>
+        })}
+      </div>
+
+      <div className="preferences">
+        <div className="section-heading compact"><div><span className="section-number">02</span><h2>Route preferences</h2></div><span className="auto-saved"><Check size={13}/> Saved automatically</span></div>
+        <div className="preference-row">
+          <Toggle icon={Radar} label="Avoid crowds" note="Use predicted flow" checked={prefs.crowds} onChange={() => onPrefs({ ...prefs, crowds: !prefs.crowds })}/>
+          <Toggle icon={Headphones} label="Prefer quiet" note="Reduce noise exposure" checked={prefs.quiet} onChange={() => onPrefs({ ...prefs, quiet: !prefs.quiet })}/>
+          <Toggle icon={Accessibility} label="No stairs" note="Hard route constraint" checked={prefs.stairs} onChange={() => onPrefs({ ...prefs, stairs: !prefs.stairs })}/>
+        </div>
+      </div>
+
+      <button className="primary-action" disabled={!selected} onClick={onStart}>
+        <span><Navigation size={20} fill="currentColor"/> Start guidance</span>
+        <span>{selected ? 'Route ready' : 'Choose a destination'} <ChevronRight size={18}/></span>
+      </button>
+    </section>
+
+    <aside className="trust-strip" aria-label="System capabilities">
+      <div><ShieldCheck/><span><b>Privacy first</b><small>Camera stays on-device</small></span></div>
+      <div><CloudOff/><span><b>Offline ready</b><small>Venue map is cached</small></span></div>
+      <div><Sparkles/><span><b>Predictive</b><small>Avoids crowd surges</small></span></div>
+      <p><Info size={15}/> Prototype guidance supplements—not replaces—your mobility aid and venue staff.</p>
+    </aside>
+    <TelemetryFeed compact readAloud={readTelemetry} />
+  </div>
+}
+
+function Toggle({ icon: Icon, label, note, checked, onChange }) {
+  return <button className={`preference ${checked ? 'on' : ''}`} onClick={onChange} aria-pressed={checked}>
+    <span className="preference-icon"><Icon size={21}/></span>
+    <span><b>{label}</b><small>{note}</small></span>
+    <span className="toggle" aria-hidden="true"><i/></span>
+  </button>
+}
+
+function JourneyView({ mode, speechEnabled, destination, step, remaining, progress, paused, hazard, offline, routeReason, readTelemetry, onPause, onAdvance, onHazard, onOffline, onRepeat, onEnd }) {
+  const current = instructions[step]
+  const CurrentIcon = current.icon
+  return <div className="journey-page">
+    <div className="journey-header">
+      <button className="back-button" onClick={onEnd}><ArrowLeft size={18}/> End guidance</button>
+      <div className="journey-destination"><span>Guiding to</span><b>{destination.name}</b></div>
+      <div className={`connection ${offline ? 'offline' : ''}`}>{offline ? <WifiOff/> : <Wifi/>}{offline ? 'Offline · cached route' : 'Live conditions'}</div>
+    </div>
+
+    <section className={`guidance-card ${hazard ? 'hazard-state' : ''}`} aria-live="polite">
+      <div className="guidance-kicker">{paused ? 'NAVIGATION PAUSED' : hazard ? 'ROUTE UPDATED' : 'NEXT INSTRUCTION'}</div>
+      <div className="instruction-icon"><CurrentIcon size={42}/></div>
+      <h1>{paused ? 'Paused' : current.title}</h1>
+      <p>{paused ? 'Route state is saved. Resume when you are ready.' : current.detail}</p>
+      <div className="instruction-actions">
+        <button onClick={onRepeat}><Volume2/> Repeat</button>
+        <button className="pause-action" onClick={onPause}>{paused ? <Play fill="currentColor"/> : <Pause fill="currentColor"/>}{paused ? 'Resume' : 'Pause'}</button>
+      </div>
+    </section>
+
+    <section className="route-progress" aria-label="Journey progress">
+      <div className="metric"><small>Remaining</small><b>{remaining} m</b></div>
+      <div className="progress-track"><i style={{ width: `${progress}%` }}/><span style={{ left: `${progress}%` }}><Navigation size={16} fill="currentColor"/></span></div>
+      <div className="metric right"><small>Estimated</small><b>{Math.max(1, 5 - step)} min</b></div>
+    </section>
+
+    <div className="journey-grid">
+      <section className="route-story">
+        <div className="card-label"><Route/> YOUR ROUTE</div>
+        <div className="route-reason"><ShieldCheck/><div><b>Safer route selected</b><p>{routeReason}.</p></div></div>
+        <div className="step-list">
+          {instructions.map((item, i) => {
+            const Icon = item.icon
+            return <div key={item.title} className={`${i === step ? 'current' : ''} ${i < step ? 'done' : ''}`}><span>{i < step ? <Check/> : <Icon/>}</span><div><b>{item.title}</b><small>{item.detail}</small></div>{i === step && <em>Now</em>}</div>
+          })}
+        </div>
+      </section>
+      <section className="demo-controls">
+        <div className="card-label"><Gauge/> DEMO CONTROLS</div>
+        <p>Simulate live venue conditions and verify safety behaviour.</p>
+        <button onClick={onAdvance}><Play/> Advance journey<span>Next GPS point</span></button>
+        <button className="danger-control" onClick={onHazard}><TriangleAlert/> Detect barrier<span>Trigger reroute</span></button>
+        <button onClick={onOffline}>{offline ? <Wifi/> : <WifiOff/>}{offline ? 'Restore connection' : 'Lose connection'}<span>{offline ? 'Resume live data' : 'Use venue cache'}</span></button>
+      </section>
+    </div>
+    {mode === 'lowVision' && <CameraScanner speechEnabled={speechEnabled} onHazard={onHazard} />}
+    <TelemetryFeed navigationPriority={!paused} readAloud={readTelemetry} />
+  </div>
+}
+
+function OperatorView({ onBack, readTelemetry }) {
+  const [surge, setSurge] = useState(false)
+  return <div className="operator-page">
+    <div className="operator-hero">
+      <div><div className="eyebrow"><span>OPERATOR</span> LIVE VENUE INTELLIGENCE</div><h1>Albert Park <em>overview</em></h1><p>Privacy-safe signals reveal access friction without exposing individual journeys.</p></div>
+      <button className="outline-action" onClick={onBack}><Navigation/> Open navigator</button>
+    </div>
+    <div className="metrics-grid">
+      <Metric icon={Route} value="148" label="Routes completed" change="+12% today"/>
+      <Metric icon={AlertTriangle} value={surge ? '9' : '6'} label="Active barriers" change="3 need review" warning/>
+      <Metric icon={Radar} value={surge ? 'High' : 'Moderate'} label="Gate 2 forecast" change="8 min horizon" warning={surge}/>
+      <Metric icon={ShieldCheck} value="94%" label="Route confidence" change="Across active routes"/>
+    </div>
+    <div className="operator-grid">
+      <section className="venue-map-card">
+        <div className="card-top"><div><span className="card-label"><MapPin/> ACCESSIBILITY SIGNALS</span><h2>Venue pressure map</h2></div><div className="legend"><span className="low"/> Clear <span className="medium"/> Watch <span className="high"/> Act</div></div>
+        <VenueMap surge={surge}/>
+        <div className="map-note"><ShieldCheck/> Locations appear only after five independent observations.</div>
+      </section>
+      <section className="insights-card">
+        <div className="card-top"><div><span className="card-label"><BarChart3/> PRIORITY INSIGHTS</span><h2>Needs attention</h2></div></div>
+        <div className="insight urgent"><span><TriangleAlert/></span><div><b>Temporary barrier · East concourse</b><p>8 reports · causing 2.4 min average detour</p></div><em>P1</em></div>
+        <div className="insight"><span><Radar/></span><div><b>Gate 2 surge predicted</b><p>Session ending · opposing pedestrian flows</p></div><em>P2</em></div>
+        <div className="insight"><span><Accessibility/></span><div><b>West bridge accessibility debt</b><p>No step-free connection · 410 m detour</p></div><em>P2</em></div>
+        <button className="surge-button" onClick={() => setSurge(!surge)}><Radio/> {surge ? 'Reset crowd simulation' : 'Simulate session ending'}<ChevronRight/></button>
+      </section>
+    </div>
+    <section className="activity-card">
+      <div className="card-top"><div><span className="card-label"><Timer/> INCIDENT TIMELINE</span><h2>What changed today</h2></div><button className="text-button">View all activity <ChevronRight/></button></div>
+      <div className="timeline">
+        <div><time>14:42</time><span className="event-dot red"/><p><b>Barrier corroborated</b><small>East concourse · 5th independent report</small></p><em>Action needed</em></div>
+        <div><time>14:36</time><span className="event-dot amber"/><p><b>Crowd forecast increased</b><small>Gate 2 · qualifying ends in 14 minutes</small></p><em>Monitoring</em></div>
+        <div><time>14:18</time><span className="event-dot green"/><p><b>Accessible toilet reopened</b><small>Fan zone south · confirmed by venue staff</small></p><em>Resolved</em></div>
+      </div>
+    </section>
+    <TelemetryFeed operator readAloud={readTelemetry} />
+  </div>
+}
+
+function SettingsDialog({ mode, navigationSpeech, readTelemetry, onMode, onNavigationSpeech, onReadTelemetry, onSignOut, onClose }) {
+  useEffect(() => {
+    const closeOnEscape = (event) => event.key === 'Escape' && onClose()
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
+
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div className="dialog-head"><div><span>PROFILE & ACCESSIBILITY</span><h2 id="settings-title">Pilot settings</h2></div><button onClick={onClose} aria-label="Close settings"><X/></button></div>
+      <p className="dialog-intro">Choose your navigation mode and which information Paddock Pilot reads aloud.</p>
+      <div className="mode-setting" role="group" aria-label="Navigation mode">
+        <button className={mode === 'lowVision' ? 'selected' : ''} onClick={() => onMode('lowVision')} aria-pressed={mode === 'lowVision'}><Eye/><span><b>Low-vision pilot</b><small>Voice assistant and camera hazards</small></span></button>
+        <button className={mode === 'standard' ? 'selected' : ''} onClick={() => onMode('standard')} aria-pressed={mode === 'standard'}><Navigation/><span><b>Standard navigator</b><small>Visual navigation without camera</small></span></button>
+      </div>
+      <button className={`setting-row ${navigationSpeech ? 'enabled' : ''}`} onClick={() => onNavigationSpeech(!navigationSpeech)} aria-pressed={navigationSpeech}>
+        <span className="setting-icon"><Volume2/></span>
+        <span><b>Navigation text to speech</b><small>Directions, destination answers and hazard warnings</small></span>
+        <span className="large-toggle" aria-hidden="true"><i/></span>
+      </button>
+      <button className={`setting-row ${readTelemetry ? 'enabled' : ''}`} onClick={() => onReadTelemetry(!readTelemetry)} aria-pressed={readTelemetry}>
+        <span className="setting-icon"><Volume2/></span>
+        <span><b>Read race updates aloud</b><small>Race control, timing, weather and session changes</small></span>
+        <span className="large-toggle" aria-hidden="true"><i/></span>
+      </button>
+      <div className="priority-note"><ShieldCheck/><span><b>Safety audio always wins</b><small>Turn guidance, hazards and emergency messages interrupt race updates.</small></span></div>
+      <button className="dialog-done" onClick={onClose}>Done</button>
+      <button className="sign-out-button" onClick={onSignOut}><LogOut/> Sign out</button>
+    </section>
+  </div>
+}
+
+function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
+  const videoRef = useRef(null)
+  const canvasRef = useRef(null)
+  const streamRef = useRef(null)
+  const modelRef = useRef(null)
+  const analysisTimerRef = useRef(null)
+  const persistenceRef = useRef({ crowd: 0, object: 0, wall: 0 })
+  const lastAlertRef = useRef(0)
+  const [cameraState, setCameraState] = useState('off')
+  const [facingMode, setFacingMode] = useState('environment')
+  const [modelState, setModelState] = useState('idle')
+  const [detections, setDetections] = useState([])
+  const [fps, setFps] = useState(0)
+  const [message, setMessage] = useState('Camera is off. Navigation continues using location and venue data.')
+
+  useEffect(() => () => stopStream(), [])
+
+  function stopStream() {
+    clearTimeout(analysisTimerRef.current)
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+  }
+
+  async function loadDetector() {
+    if (modelRef.current) return modelRef.current
+    setModelState('loading')
+    setMessage('Downloading the on-device object detection model. This happens once per session.')
+    const tf = await import('@tensorflow/tfjs')
+    await tf.ready()
+    const cocoSsd = await import('@tensorflow-models/coco-ssd')
+    modelRef.current = await cocoSsd.load({ base: 'lite_mobilenet_v2' })
+    setModelState('ready')
+    return modelRef.current
+  }
+
+  async function startCamera(requestedFacing = facingMode) {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraState('unavailable')
+      setMessage('Camera is unavailable in this browser. Use the demo scan to test hazard handling.')
+      return
+    }
+    setCameraState('requesting')
+    setMessage(`Waiting for ${requestedFacing === 'environment' ? 'rear' : 'front'} camera permission.`)
+    try {
+      stopStream()
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: requestedFacing }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+      setCameraState('active')
+      setFacingMode(requestedFacing)
+      setMessage(`${requestedFacing === 'environment' ? 'Rear' : 'Front'} camera active. Loading on-device hazard detection.`)
+      if (speechEnabled) speak(`${requestedFacing === 'environment' ? 'Rear' : 'Front'} camera active. Forward hazard scanning is on.`)
+      try {
+        await loadDetector()
+        setMessage('Detection active. Analysing the forward route corridor on this device.')
+        scheduleAnalysis()
+      } catch {
+        setModelState('error')
+        setMessage('Camera is active, but the detection model could not load. Navigation continues with reduced hazard support.')
+        if (speechEnabled) speak('Camera is active, but object detection is unavailable.')
+      }
+    } catch {
+      setCameraState('blocked')
+      setMessage('Camera access was not enabled. Navigation still works; use demo scan to test hazard handling.')
+    }
+  }
+
+  function stopCamera() {
+    stopStream()
+    if (videoRef.current) videoRef.current.srcObject = null
+    setCameraState('off')
+    setDetections([])
+    setFps(0)
+    setMessage('Camera is off. Navigation continues using location and venue data.')
+    if (speechEnabled) speak('Camera off.')
+  }
+
+  async function flipCamera() {
+    const nextFacing = facingMode === 'environment' ? 'user' : 'environment'
+    setMessage(`Switching to the ${nextFacing === 'environment' ? 'rear' : 'front'} camera.`)
+    await startCamera(nextFacing)
+  }
+
+  function detectWallLikeOcclusion(video) {
+    const canvas = canvasRef.current
+    if (!canvas || video.videoWidth === 0) return false
+    const width = 96
+    const height = 72
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    context.drawImage(video, 0, 0, width, height)
+    const pixels = context.getImageData(26, 25, 44, 42).data
+    let sum = 0
+    let sumSq = 0
+    let edges = 0
+    let previous = 0
+    const samples = pixels.length / 4
+    for (let index = 0; index < pixels.length; index += 4) {
+      const luminance = pixels[index] * .2126 + pixels[index + 1] * .7152 + pixels[index + 2] * .0722
+      sum += luminance
+      sumSq += luminance * luminance
+      if (index > 0) edges += Math.abs(luminance - previous)
+      previous = luminance
+    }
+    const mean = sum / samples
+    const variance = sumSq / samples - mean * mean
+    const averageEdge = edges / samples
+    return variance < 310 && averageEdge < 13 && mean > 18 && mean < 235
+  }
+
+  function persistentHazard(type, label, confidence) {
+    for (const key of Object.keys(persistenceRef.current)) {
+      persistenceRef.current[key] = key === type ? persistenceRef.current[key] + 1 : 0
+    }
+    if (persistenceRef.current[type] < 3 || Date.now() - lastAlertRef.current < 12000) return
+    lastAlertRef.current = Date.now()
+    persistenceRef.current[type] = 0
+    const confidenceText = confidence >= .8 ? 'high confidence' : 'moderate confidence'
+    setCameraState('active-hazard')
+    setMessage(`Possible ${label} detected in the route corridor with ${confidenceText}.`)
+    onHazard(label)
+  }
+
+  async function analyseFrame() {
+    const startedAt = performance.now()
+    const video = videoRef.current
+    const model = modelRef.current
+    if (!video || !model || !streamRef.current || video.readyState < 2) return
+    try {
+      const predictions = await model.detect(video, 12, .5)
+      const width = video.videoWidth
+      const height = video.videoHeight
+      const people = predictions.filter((item) => item.class === 'person' && item.score >= .55)
+      const corridorObjects = predictions.filter((item) => {
+        const [x, y, boxWidth, boxHeight] = item.bbox
+        const centreX = (x + boxWidth / 2) / width
+        const bottom = (y + boxHeight) / height
+        const obstacleClasses = ['car', 'truck', 'bus', 'motorcycle', 'bicycle', 'chair', 'bench', 'suitcase', 'backpack', 'dog']
+        return obstacleClasses.includes(item.class) && centreX > .24 && centreX < .76 && bottom > .48 && item.score >= .58
+      })
+      setDetections(predictions.filter((item) => item.score >= .55).slice(0, 12))
+      if (people.length >= 3) {
+        persistentHazard('crowd', `crowd of ${people.length} people`, Math.min(.95, Math.max(...people.map((item) => item.score))))
+      } else if (corridorObjects.length) {
+        const nearest = corridorObjects.sort((a, b) => b.bbox[2] * b.bbox[3] - a.bbox[2] * a.bbox[3])[0]
+        persistentHazard('object', `${nearest.class} blocking the route`, nearest.score)
+      } else if (detectWallLikeOcclusion(video)) {
+        persistentHazard('wall', 'solid obstruction or wall', .62)
+      } else {
+        persistenceRef.current = { crowd: 0, object: 0, wall: 0 }
+        if (cameraState === 'active-hazard') setCameraState('active')
+      }
+      setFps(Math.max(1, Math.round(1000 / Math.max(1, performance.now() - startedAt))))
+    } catch {
+      setMessage('Detection paused temporarily. Camera navigation support is reduced.')
+    }
+  }
+
+  function scheduleAnalysis() {
+    clearTimeout(analysisTimerRef.current)
+    const tick = async () => {
+      await analyseFrame()
+      if (streamRef.current) analysisTimerRef.current = setTimeout(tick, 650)
+    }
+    analysisTimerRef.current = setTimeout(tick, 300)
+  }
+
+  function runDemoScan() {
+    setCameraState('detecting')
+    setMessage('Scanning the forward route corridor.')
+    setTimeout(() => {
+      setCameraState(streamRef.current ? 'active-hazard' : 'demo-hazard')
+      setMessage('Possible temporary barrier detected ahead with high confidence.')
+      onHazard()
+    }, 1100)
+  }
+
+  const active = cameraState === 'active' || cameraState === 'active-hazard' || cameraState === 'detecting'
+  const detected = cameraState === 'active-hazard' || cameraState === 'demo-hazard'
+
+  const cameraVisual = <div className="camera-view" aria-label="Forward camera preview">
+    <video ref={videoRef} muted playsInline aria-hidden={!active}/>
+    <canvas ref={canvasRef} hidden/>
+    {!active && <div className="camera-placeholder"><Camera/><b>Rear camera off</b><small>Point the phone toward the route ahead</small></div>}
+    {active && <div className="scan-overlay" aria-hidden="true"><i/><span>ROUTE CORRIDOR</span></div>}
+    {active && detections.map((item, index) => <div className={`object-box ${item.class === 'person' ? 'person' : ''}`} key={`${item.class}-${index}`} aria-hidden="true" style={{ left: `${item.bbox[0] / Math.max(1, videoRef.current?.videoWidth || 1) * 100}%`, top: `${item.bbox[1] / Math.max(1, videoRef.current?.videoHeight || 1) * 100}%`, width: `${item.bbox[2] / Math.max(1, videoRef.current?.videoWidth || 1) * 100}%`, height: `${item.bbox[3] / Math.max(1, videoRef.current?.videoHeight || 1) * 100}%` }}><span>{item.class} · {Math.round(item.score * 100)}%</span></div>)}
+    {detected && <div className="detection-box" aria-hidden="true"><span>STOP · OBSTACLE AHEAD</span><b>IMMINENT</b></div>}
+  </div>
+
+  if (minimal) return <section className={`vision-zone ${active ? 'active' : ''} ${detected ? 'imminent' : ''}`} aria-labelledby="vision-zone-title">
+    <h2 id="vision-zone-title" className="sr-only">Forward hazard camera</h2>
+    {cameraVisual}
+    <div className="vision-controls">
+      {!active && <button className="vision-start" onClick={() => startCamera('environment')} disabled={cameraState === 'requesting'}><Camera/>{cameraState === 'requesting' ? 'Waiting for camera permission' : 'Start rear camera'}</button>}
+      {active && <><button onClick={flipCamera}><SwitchCamera/> Use {facingMode === 'environment' ? 'front' : 'rear'} camera</button><button onClick={stopCamera}><X/> Camera off</button></>}
+      <button className="vision-demo" onClick={runDemoScan} disabled={cameraState === 'detecting'}><ScanLine/> Test obstacle alert</button>
+    </div>
+    <div className="vision-spoken-status" role="status" aria-live={detected ? 'assertive' : 'polite'}>{detected ? 'Stop. Imminent obstacle ahead.' : message}</div>
+  </section>
+
+  return <section className={`camera-panel ${active ? 'active' : ''} ${detected ? 'detected' : ''}`} aria-labelledby="camera-title">
+    <div className="camera-copy">
+      <span className="card-label"><Camera/> FORWARD CAMERA</span>
+      <h2 id="camera-title">Hazard scan</h2>
+      <p>Live on-device detection watches the route corridor for sustained crowds, vehicles, loose objects and possible solid obstructions.</p>
+      <div className="privacy-chip"><Lock/><span><b>On-device only</b><small>No recording, upload or face recognition</small></span></div>
+      <div className="camera-meta"><span><b>{facingMode === 'environment' ? 'Rear camera' : 'Front camera'}</b><small>{modelState === 'ready' ? `Detector ready${fps ? ` · ${fps} FPS` : ''}` : modelState === 'loading' ? 'Loading detector…' : modelState === 'error' ? 'Detector unavailable' : 'Detector starts with camera'}</small></span>{active && <button onClick={flipCamera}><SwitchCamera/> Use {facingMode === 'environment' ? 'front' : 'rear'} camera</button>}</div>
+      <div className="camera-status" role="status"><span className={`camera-dot ${detected ? 'danger' : active ? 'live' : ''}`}/>{message}</div>
+      <div className="camera-actions">
+        {active ? <button className="camera-secondary" onClick={stopCamera}><X/> Turn camera off</button> : <button className="camera-primary" onClick={() => startCamera('environment')} disabled={cameraState === 'requesting'}><Camera/> {cameraState === 'requesting' ? 'Waiting for permission…' : 'Use rear camera'}</button>}
+        <button className="camera-secondary" onClick={runDemoScan} disabled={cameraState === 'detecting'}><ScanLine/> {cameraState === 'detecting' ? 'Scanning…' : 'Run demo scan'}</button>
+      </div>
+    </div>
+    {cameraVisual}
+  </section>
+}
+
+const telemetryEvents = [
+  { type: 'Race control', title: 'Yellow flag · Turn 6', detail: 'Debris reported on circuit', time: '14:44:08', tone: 'yellow', icon: Flag },
+  { type: 'Timing', title: 'PIA improves to P2', detail: '+0.182 to session leader', time: '14:43:51', tone: 'green', icon: TrendingUp },
+  { type: 'Weather', title: 'Light rain expected', detail: 'In approximately 12 minutes', time: '14:43:22', tone: 'blue', icon: CloudRain },
+  { type: 'Session', title: 'Track status clear', detail: 'Green flag conditions restored', time: '14:42:57', tone: 'green', icon: Zap },
+]
+
+function TelemetryFeed({ compact = false, navigationPriority = false, operator = false, readAloud = false }) {
+  const [running, setRunning] = useState(true)
+  const [elapsed, setElapsed] = useState(418)
+  const [activeEvent, setActiveEvent] = useState(0)
+
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(() => {
+      setElapsed((value) => value + 1)
+      setActiveEvent((value) => (value + 1) % telemetryEvents.length)
+    }, 5000)
+    return () => clearInterval(id)
+  }, [running])
+
+  useEffect(() => {
+    if (!running || !readAloud) return
+    const event = telemetryEvents[activeEvent]
+    if ('speechSynthesis' in window && !window.speechSynthesis.speaking) {
+      const update = new SpeechSynthesisUtterance(`${event.type} update. ${event.title}. ${event.detail}.`)
+      update.rate = 0.96
+      update.pitch = 0.92
+      window.speechSynthesis.speak(update)
+    }
+  }, [activeEvent, readAloud, running])
+
+  const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0')
+  const seconds = (elapsed % 60).toString().padStart(2, '0')
+  const visibleEvents = compact ? telemetryEvents.slice(activeEvent, activeEvent + 1) : telemetryEvents
+
+  return <section className={`telemetry-feed ${compact ? 'compact' : ''} ${operator ? 'operator-feed' : ''}`} aria-labelledby={`telemetry-title-${compact ? 'compact' : operator ? 'operator' : 'journey'}`}>
+    <div className="telemetry-head">
+      <div className="telemetry-title">
+        <span className="live-pulse" aria-hidden="true" />
+        <div><span>HISTORICAL REPLAY</span><h2 id={`telemetry-title-${compact ? 'compact' : operator ? 'operator' : 'journey'}`}>Race telemetry</h2></div>
+      </div>
+      <div className="session-clock"><small>Q2 · SESSION CLOCK</small><b>07:{minutes}:{seconds}</b></div>
+      <div className="telemetry-actions">
+        {readAloud && <span className="audio-suppressed"><Volume2/> Read aloud on{navigationPriority ? ' · navigation priority' : ''}</span>}
+        {!readAloud && <span className="audio-suppressed muted"><VolumeX/> Read aloud off</span>}
+        <button onClick={() => setRunning(!running)} aria-pressed={!running}>{running ? <Pause/> : <Play/>}<span>{running ? 'Pause feed' : 'Resume feed'}</span></button>
+      </div>
+    </div>
+    <div className="telemetry-body">
+      <div className="leaderboard" aria-label="Top three timing positions">
+        <div><em>1</em><span><b>NOR</b><small>McLaren</small></span><strong>1:16.742</strong></div>
+        <div className="featured"><em>2</em><span><b>PIA</b><small>McLaren</small></span><strong>+0.182</strong></div>
+        <div><em>3</em><span><b>LEC</b><small>Ferrari</small></span><strong>+0.291</strong></div>
+      </div>
+      <div className="telemetry-events" aria-live="off">
+        {visibleEvents.map((event, index) => {
+          const EventIcon = event.icon
+          return <div className={`telemetry-event ${event.tone} ${!compact && index === activeEvent ? 'latest' : ''}`} key={`${event.time}-${compact ? activeEvent : index}`}>
+            <span><EventIcon/></span><div><small>{event.type}</small><b>{event.title}</b><p>{event.detail}</p></div><time>{event.time}</time>
+          </div>
+        })}
+      </div>
+      <div className="conditions">
+        <div><CloudRain/><span><small>TRACK</small><b>29.4°C</b></span></div>
+        <div><Gauge/><span><small>WIND</small><b>18 km/h</b></span></div>
+        <div><Timer/><span><small>SESSION ENDS</small><b>8 min</b></span></div>
+      </div>
+    </div>
+    <footer><Info/> Replay telemetry is illustrative and remains lower priority than navigation and safety guidance.</footer>
+  </section>
+}
+
+function Metric({ icon: Icon, value, label, change, warning }) {
+  return <div className={`metric-card ${warning ? 'warning' : ''}`}><div><span><Icon/></span><small>{label}</small></div><b>{value}</b><p>{change}</p></div>
+}
+
+function VenueMap({ surge }) {
+  return <div className="venue-map" role="img" aria-label={`Simplified Albert Park venue pressure map. Gate 2 crowd pressure is ${surge ? 'high' : 'moderate'}.`}>
+    <svg viewBox="0 0 720 390" aria-hidden="true">
+      <defs><pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse"><path d="M28 0H0V28" fill="none" stroke="#d9d8d1" strokeWidth=".6"/></pattern></defs>
+      <rect width="720" height="390" fill="url(#grid)"/>
+      <path className="lake" d="M268 72c82-49 190-34 226 22 38 60 8 111-54 134-74 28-124 91-196 67-68-23-90-91-45-140 25-27 27-58 69-83Z"/>
+      <path className="track" d="M93 259c31-83 102-167 210-193 109-26 239-4 309 62 66 62 37 144-52 177-85 32-200 33-308 29-108-4-192 8-159-75Z"/>
+      <path className="track-inner" d="M142 252c29-63 91-126 177-145 87-19 198-3 250 44 45 41 20 89-46 110-73 24-171 25-262 22-81-3-146 3-119-31Z"/>
+      <path className="route-line" d="M105 285C175 300 194 247 240 229S315 185 351 201s47 65 97 70 98-25 156-67"/>
+      <circle className="map-point start" cx="105" cy="285" r="9"/><circle className="map-point end" cx="604" cy="204" r="9"/>
+      <circle className="pulse amber" cx="443" cy="271" r={surge ? '32' : '23'}/><circle className={`pulse ${surge ? 'red' : 'amber'}`} cx="577" cy="170" r={surge ? '42' : '25'}/><circle className="pulse red" cx="251" cy="222" r="27"/>
+      <g className="map-label"><rect x="200" y="184" width="105" height="29" rx="5"/><text x="252" y="203">BARRIER · 8</text></g>
+      <g className="map-label"><rect x="527" y="124" width="98" height="29" rx="5"/><text x="576" y="143">GATE 2 · {surge ? 'HIGH' : 'WATCH'}</text></g>
+      <text className="zone-label" x="83" y="320">GATE 1</text><text className="zone-label" x="570" y="235">EAST CONCOURSE</text><text className="water-label" x="330" y="155">ALBERT PARK LAKE</text>
+    </svg>
+  </div>
+}
+
+createRoot(document.getElementById('root')).render(<React.StrictMode><App/></React.StrictMode>)

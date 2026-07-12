@@ -1,10 +1,11 @@
-const CACHE = 'paddock-pilot-offline-v5'
+const CACHE = 'paddock-pilot-offline-v6'
 const CORE = [
   './',
   './piper/piper_phonemize.wasm',
   './piper/piper_phonemize.data',
   './piper/ort/ort-wasm-simd-threaded.wasm',
   './piper/ort/ort-wasm-simd-threaded.jsep.wasm',
+  './piper/ort/ort-wasm-simd-threaded.jsep.mjs',
 ]
 
 self.addEventListener('install', (event) => {

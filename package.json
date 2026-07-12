@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:pages": "vite build --mode github-pages && cp dist/source/index.html dist/index.html",
-    "publish:branch-pages": "npm run build:pages && cp dist/index.html index.html && cp -R dist/assets . && cp -R dist/piper . && cp dist/sw.js sw.js",
+    "publish:branch-pages": "npm run build:pages && cp dist/index.html index.html && cp -R dist/assets . && cp -R dist/piper . && cp -R dist/models . && cp dist/sw.js sw.js",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -700,6 +700,8 @@ function JourneyView({ mode, speechEnabled, destination, instructions, step, rem
       <div className={`connection ${offline ? 'offline' : ''}`}>{offline ? <WifiOff/> : <Wifi/>}{offline ? 'Offline · cached route' : 'Live conditions'}</div>
     </div>
 
+    {mode === 'lowVision' && <CameraScanner promptOnLoad navigationLead speechEnabled={speechEnabled} onHazard={onHazard} />}
+
     <section className={`guidance-card ${hazard ? 'hazard-state' : ''}`} aria-live="polite">
       <div className="guidance-kicker">{paused ? 'NAVIGATION PAUSED' : hazard ? 'ROUTE UPDATED' : 'NEXT INSTRUCTION'}</div>
       <div className="instruction-icon"><CurrentIcon size={42}/></div>
@@ -719,7 +721,7 @@ function JourneyView({ mode, speechEnabled, destination, instructions, step, rem
 
     <section className="movement-strip" aria-label="GPS and camera monitoring">
       <div><MapPin/><span><b>{gpsLabel}</b><small>{gpsState.latitude && gpsState.longitude ? `${gpsState.latitude.toFixed(5)}, ${gpsState.longitude.toFixed(5)}` : 'Movement tracking starts with navigation'}</small></span></div>
-      <div><Camera/><span><b>Camera safety monitor</b><small>{mode === 'lowVision' ? 'Rear camera starts automatically below' : 'Low-vision mode can enable camera hazard scanning'}</small></span></div>
+      <div><Camera/><span><b>Camera safety monitor</b><small>{mode === 'lowVision' ? 'Rear camera controls are at the top of this screen' : 'Low-vision mode can enable camera hazard scanning'}</small></span></div>
     </section>
 
     <div className="journey-grid">
@@ -741,7 +743,6 @@ function JourneyView({ mode, speechEnabled, destination, instructions, step, rem
         <button onClick={onOffline}>{offline ? <Wifi/> : <WifiOff/>}{offline ? 'Restore connection' : 'Lose connection'}<span>{offline ? 'Resume live data' : 'Use venue cache'}</span></button>
       </section>
     </div>
-    {mode === 'lowVision' && <CameraScanner autoStart speechEnabled={speechEnabled} onHazard={onHazard} />}
     <TelemetryFeed navigationPriority={!paused} readAloud={readTelemetry} />
   </div>
 }
@@ -857,13 +858,13 @@ function SettingsDialog({ mode, navigationSpeech, readTelemetry, onMode, onNavig
   </div>
 }
 
-function CameraScanner({ minimal = false, autoStart = false, speechEnabled, onHazard }) {
+function CameraScanner({ minimal = false, promptOnLoad = false, navigationLead = false, speechEnabled, onHazard }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const streamRef = useRef(null)
   const modelRef = useRef(null)
   const analysisTimerRef = useRef(null)
-  const autoStartAttemptedRef = useRef(false)
+  const startPromptAnnouncedRef = useRef(false)
   const persistenceRef = useRef({ crowd: 0, person: 0, vehicle: 0, object: 0, pole: 0, wall: 0 })
   const lastAlertRef = useRef(0)
   const [cameraState, setCameraState] = useState('off')
@@ -875,10 +876,11 @@ function CameraScanner({ minimal = false, autoStart = false, speechEnabled, onHa
 
   useEffect(() => () => stopStream(), [])
   useEffect(() => {
-    if (!autoStart || autoStartAttemptedRef.current) return
-    autoStartAttemptedRef.current = true
-    startCamera('environment')
-  }, [autoStart])
+    if (!promptOnLoad || startPromptAnnouncedRef.current) return
+    startPromptAnnouncedRef.current = true
+    setMessage('Camera ready. Press Start rear camera to enable forward hazard detection.')
+    if (speechEnabled) speak('Camera ready. Press start rear camera to begin hazard detection.', SpeechPriority.NAVIGATION)
+  }, [promptOnLoad, speechEnabled])
 
   function stopStream() {
     clearTimeout(analysisTimerRef.current)
@@ -891,9 +893,14 @@ function CameraScanner({ minimal = false, autoStart = false, speechEnabled, onHa
     setModelState('loading')
     setMessage('Preparing on-device obstacle detection.')
     const tf = await import('@tensorflow/tfjs')
+    try {
+      await tf.setBackend('webgl')
+    } catch {
+      await tf.setBackend('cpu')
+    }
     await tf.ready()
     const cocoSsd = await import('@tensorflow-models/coco-ssd')
-    modelRef.current = await cocoSsd.load({ base: 'lite_mobilenet_v2' })
+    modelRef.current = await cocoSsd.load({ base: 'lite_mobilenet_v2', modelUrl: `${import.meta.env.BASE_URL}models/coco-ssd/model.json` })
     setModelState('ready')
     return modelRef.current
   }
@@ -925,10 +932,12 @@ function CameraScanner({ minimal = false, autoStart = false, speechEnabled, onHa
         await loadDetector()
         setMessage('Detection active. Analysing the forward route corridor on this device.')
         scheduleAnalysis()
-      } catch {
+      } catch (error) {
+        console.error('Hazard detector could not initialise; using proximity scanning.', error)
         setModelState('error')
-        setMessage('Camera is active, but the detection model could not load. Navigation continues with reduced hazard support.')
-        if (speechEnabled) speak('Camera is active, but object detection is unavailable.', SpeechPriority.ROUTE_UPDATE)
+        setMessage('Basic proximity detection active. Forward corridor scanning is running on this device.')
+        scheduleAnalysis()
+        if (speechEnabled) speak('Camera active. Basic forward hazard scanning is on.', SpeechPriority.ROUTE_UPDATE)
       }
     } catch {
       setCameraState('blocked')
@@ -1024,9 +1033,9 @@ function CameraScanner({ minimal = false, autoStart = false, speechEnabled, onHa
     const startedAt = performance.now()
     const video = videoRef.current
     const model = modelRef.current
-    if (!video || !model || !streamRef.current || video.readyState < 2) return
+    if (!video || !streamRef.current || video.readyState < 2) return
     try {
-      const predictions = await model.detect(video, 12, .5)
+      const predictions = model ? await model.detect(video, 12, .5) : []
       const width = video.videoWidth
       const height = video.videoHeight
       const people = predictions.filter((item) => item.class === 'person' && item.score >= .55)
@@ -1093,6 +1102,7 @@ function CameraScanner({ minimal = false, autoStart = false, speechEnabled, onHa
     {active && <div className="scan-overlay" aria-hidden="true"><i/><span>ROUTE CORRIDOR</span></div>}
     {active && detections.map((item, index) => <div className={`object-box ${item.class === 'person' ? 'person' : ''}`} key={`${item.class}-${index}`} aria-hidden="true" style={{ left: `${item.bbox[0] / Math.max(1, videoRef.current?.videoWidth || 1) * 100}%`, top: `${item.bbox[1] / Math.max(1, videoRef.current?.videoHeight || 1) * 100}%`, width: `${item.bbox[2] / Math.max(1, videoRef.current?.videoWidth || 1) * 100}%`, height: `${item.bbox[3] / Math.max(1, videoRef.current?.videoHeight || 1) * 100}%` }}><span>{item.class} · {Math.round(item.score * 100)}%</span></div>)}
     {detected && <div className="detection-box" aria-hidden="true"><span>STOP · OBSTACLE AHEAD</span><b>IMMINENT</b></div>}
+    {!active && navigationLead && <button className="camera-start-overlay" onClick={() => startCamera('environment')} disabled={cameraState === 'requesting'}><Camera/><span><b>{cameraState === 'requesting' ? 'Waiting for permission…' : 'Start rear camera'}</b><small>Tap to enable forward hazard alerts</small></span></button>}
   </div>
 
   if (minimal) return <section className={`vision-zone ${active ? 'active' : ''} ${detected ? 'imminent' : ''}`} aria-labelledby="vision-zone-title">
@@ -1106,7 +1116,7 @@ function CameraScanner({ minimal = false, autoStart = false, speechEnabled, onHa
     <div className="vision-spoken-status" role="status" aria-live={detected ? 'assertive' : 'polite'}>{detected ? 'Stop. Imminent obstacle ahead.' : message}</div>
   </section>
 
-  return <section className={`camera-panel ${active ? 'active' : ''} ${detected ? 'detected' : ''}`} aria-labelledby="camera-title">
+  return <section className={`camera-panel ${navigationLead ? 'navigation-camera-first' : ''} ${active ? 'active' : ''} ${detected ? 'detected' : ''}`} aria-labelledby="camera-title">
     <div className="camera-copy">
       <span className="card-label"><Camera/> FORWARD CAMERA</span>
       <h2 id="camera-title">Hazard scan</h2>
@@ -1115,7 +1125,7 @@ function CameraScanner({ minimal = false, autoStart = false, speechEnabled, onHa
       <div className="camera-meta"><span><b>{facingMode === 'environment' ? 'Rear camera' : 'Front camera'}</b><small>{modelState === 'ready' ? `Detector ready${fps ? ` · ${fps} FPS` : ''}` : modelState === 'loading' ? 'Loading detector…' : modelState === 'error' ? 'Detector unavailable' : 'Detector starts with camera'}</small></span>{active && <button onClick={flipCamera}><SwitchCamera/> Use {facingMode === 'environment' ? 'front' : 'rear'} camera</button>}</div>
       <div className="camera-status" role="status"><span className={`camera-dot ${detected ? 'danger' : active ? 'live' : ''}`}/>{message}</div>
       <div className="camera-actions">
-        {active ? <button className="camera-secondary" onClick={stopCamera}><X/> Turn camera off</button> : <button className="camera-primary" onClick={() => startCamera('environment')} disabled={cameraState === 'requesting'}><Camera/> {cameraState === 'requesting' ? 'Waiting for permission…' : 'Use rear camera'}</button>}
+        {active ? <button className="camera-secondary" onClick={stopCamera}><X/> Turn camera off</button> : <button className="camera-primary" onClick={() => startCamera('environment')} disabled={cameraState === 'requesting'}><Camera/> {cameraState === 'requesting' ? 'Waiting for permission…' : 'Start rear camera'}</button>}
         <button className="camera-secondary" onClick={scanRoute} disabled={cameraState === 'detecting'}><ScanLine/> {cameraState === 'detecting' ? 'Scanning…' : 'Scan route'}</button>
       </div>
     </div>

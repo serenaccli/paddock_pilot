@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:pages": "vite build --mode github-pages",
+    "build:pages": "vite build --mode github-pages && cp dist/source/index.html dist/index.html",
+    "publish:branch-pages": "npm run build:pages && cp dist/index.html index.html && cp -R dist/assets .",
     "preview": "vite preview"
   },
   "dependencies": {

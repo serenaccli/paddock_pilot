@@ -11,18 +11,155 @@ import {
 import './styles.css'
 
 const destinations = [
-  { id: 'toilet', name: 'Accessible toilet', detail: 'East concourse · open', time: '4 min', distance: '318 m', icon: Accessibility },
-  { id: 'grandstand', name: 'Grandstand 2', detail: 'Accessible platform', time: '6 min', distance: '470 m', icon: MapPin },
+  { id: 'bathroom', name: 'Accessible bathroom', detail: 'East concourse · open', time: '4 min', distance: '318 m', icon: Accessibility, aliases: ['toilet', 'bathroom', 'restroom', 'loo'] },
+  { id: 'exit', name: 'Nearest exit', detail: 'Gate 1 · step-free', time: '5 min', distance: '405 m', icon: LogOut, aliases: ['exit', 'gate', 'leave', 'way out'] },
+  { id: 'grandstand', name: 'Grandstand 2', detail: 'Accessible platform', time: '6 min', distance: '470 m', icon: MapPin, aliases: ['grandstand', 'stand', 'viewing'] },
+  { id: 'seat', name: 'Seat finder', detail: 'Section and row lookup', time: '7 min', distance: '520 m', icon: User, aliases: ['seat', 'row', 'section', 'place', 'placing'] },
+  { id: 'street', name: 'Street pickup point', detail: 'Named street exit', time: '8 min', distance: '640 m', icon: Navigation, aliases: ['street', 'road', 'avenue', 'drive'] },
   { id: 'quiet', name: 'Quiet area', detail: 'Low sensory zone', time: '3 min', distance: '215 m', icon: Headphones },
   { id: 'medical', name: 'Medical station', detail: 'Staffed now', time: '5 min', distance: '390 m', icon: ShieldCheck },
 ]
 
-const instructions = [
+const baseInstructions = [
   { title: 'Continue forward', detail: '35 metres along the east concourse', icon: Navigation },
   { title: 'Turn left', detail: 'after the metal barrier', icon: ArrowLeft },
   { title: 'Keep right', detail: 'at the water refill point', icon: ArrowRight },
   { title: 'Destination ahead', detail: 'entrance on your left', icon: MapPin },
 ]
+
+const routeTemplates = {
+  bathroom: baseInstructions,
+  exit: [
+    { title: 'Continue forward', detail: '45 metres toward the Gate 1 signage', icon: Navigation },
+    { title: 'Turn right', detail: 'onto the step-free outbound lane', icon: ArrowRight },
+    { title: 'Keep left', detail: 'past the ticket assistance booth', icon: ArrowLeft },
+    { title: 'Exit ahead', detail: 'Gate 1 exit is directly ahead', icon: LogOut },
+  ],
+  grandstand: [
+    { title: 'Continue forward', detail: '60 metres along the east concourse', icon: Navigation },
+    { title: 'Turn left', detail: 'at the grandstand letter markers', icon: ArrowLeft },
+    { title: 'Keep right', detail: 'beside the accessible viewing ramp', icon: ArrowRight },
+    { title: 'Grandstand ahead', detail: 'your grandstand entrance is on the right', icon: MapPin },
+  ],
+  seat: [
+    { title: 'Continue forward', detail: '50 metres to the aisle-number boards', icon: Navigation },
+    { title: 'Turn left', detail: 'toward the lower bowl accessible ramp', icon: ArrowLeft },
+    { title: 'Keep right', detail: 'until the row lettering is announced', icon: ArrowRight },
+    { title: 'Seat ahead', detail: 'your seat block is on this aisle', icon: User },
+  ],
+  street: [
+    { title: 'Continue forward', detail: '70 metres toward the external wayfinding signs', icon: Navigation },
+    { title: 'Turn right', detail: 'at the street-exit marker', icon: ArrowRight },
+    { title: 'Keep left', detail: 'through the accessible pickup lane', icon: ArrowLeft },
+    { title: 'Street ahead', detail: 'pickup point is past the steward post', icon: MapPin },
+  ],
+  quiet: [
+    { title: 'Continue forward', detail: '25 metres along the quieter concourse edge', icon: Navigation },
+    { title: 'Turn left', detail: 'before the speaker stack', icon: ArrowLeft },
+    { title: 'Keep right', detail: 'past the low-noise signage', icon: ArrowRight },
+    { title: 'Quiet area ahead', detail: 'entrance is on your left', icon: Headphones },
+  ],
+  medical: [
+    { title: 'Continue forward', detail: '40 metres toward the medical flag', icon: Navigation },
+    { title: 'Turn left', detail: 'after the marshal post', icon: ArrowLeft },
+    { title: 'Keep right', detail: 'beside the clear access lane', icon: ArrowRight },
+    { title: 'Medical station ahead', detail: 'staff are on your left', icon: ShieldCheck },
+  ],
+}
+
+function pickRandom(items) {
+  return items[Math.floor(Math.random() * items.length)]
+}
+
+function buildRerouteInstructions(destination, currentInstructions, currentStep, reason = 'temporary barrier') {
+  const targetLabel = destination?.name || 'your destination'
+  const completedSteps = currentInstructions.slice(0, currentStep)
+  const currentInstruction = currentInstructions[currentStep]
+  const firstTurn = pickRandom([
+    { title: 'Turn left', detail: 'in 6 metres from your current GPS point', icon: ArrowLeft },
+    { title: 'Turn right', detail: 'in 8 metres at the steward marker', icon: ArrowRight },
+    { title: 'Bear left', detail: 'toward the wider accessible lane', icon: ArrowLeft },
+    { title: 'Bear right', detail: 'toward the low-crowd concourse edge', icon: ArrowRight },
+  ])
+  const bypass = pickRandom([
+    { title: 'Continue forward', detail: '32 metres along the steward-marked bypass', icon: Navigation },
+    { title: 'Continue forward', detail: '45 metres along the quieter service lane', icon: Navigation },
+    { title: 'Follow the barrier line', detail: 'past two marshal posts until the path opens', icon: Navigation },
+    { title: 'Proceed slowly', detail: 'through the temporary access lane for 30 metres', icon: Navigation },
+  ])
+  const rejoin = pickRandom([
+    { title: 'Keep left', detail: 'at the next open gap to rejoin the accessible route', icon: ArrowLeft },
+    { title: 'Keep right', detail: 'after the water refill point to rejoin the route', icon: ArrowRight },
+    { title: 'Turn left', detail: 'at the black-and-white wayfinding sign', icon: ArrowLeft },
+    { title: 'Turn right', detail: 'when the concourse widens beside the steward post', icon: ArrowRight },
+  ])
+  const finalApproach = pickRandom([
+    `${targetLabel} is ahead after the bypass`,
+    `${targetLabel} is on the left after the bypass`,
+    `${targetLabel} is on the right after the next marshal post`,
+    `continue to the signed entrance for ${targetLabel}`,
+  ])
+  const currentContext = currentInstruction ? ` Avoids the blocked "${currentInstruction.title.toLowerCase()}" segment.` : ''
+  return [
+    ...completedSteps,
+    { title: 'Stop and hold position', detail: `possible ${reason} ahead in the route corridor.${currentContext}`, icon: TriangleAlert },
+    firstTurn,
+    bypass,
+    rejoin,
+    { title: 'Destination ahead', detail: finalApproach, icon: MapPin },
+  ]
+}
+
+const knownStreets = ['Aughtie Drive', 'Canterbury Road', 'Fitzroy Street', 'Lakeside Drive', 'Queens Road']
+
+function titleCase(value) {
+  return value.replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function extractGrandstandLetter(command) {
+  const match = command.match(/\bgrandstand\s+([a-z])\b|\bstand\s+([a-z])\b/)
+  return match ? (match[1] || match[2]).toUpperCase() : null
+}
+
+function extractSeatPlacement(command) {
+  const rowSeatMatch = command.match(/\b(?:seat|place|placing)\s+row\s+([a-z0-9-]+)\s+([a-z0-9-]+)\b/)
+  if (rowSeatMatch) return `Row ${rowSeatMatch[1].toUpperCase()}, Seat ${rowSeatMatch[2].toUpperCase()}`
+  const sectionSeatMatch = command.match(/\b(?:seat|place|placing)\s+section\s+([a-z0-9-]+)\s+(?:row\s+)?([a-z0-9-]+)\s+([a-z0-9-]+)\b/)
+  if (sectionSeatMatch) return `Section ${sectionSeatMatch[1].toUpperCase()}, Row ${sectionSeatMatch[2].toUpperCase()}, Seat ${sectionSeatMatch[3].toUpperCase()}`
+  const seatMatch = command.match(/\b(?:seat|place|placing)\s+([a-z0-9-]+)(?:\s+(?:row|section)\s+([a-z0-9-]+))?|\brow\s+([a-z0-9-]+)\s+(?:seat|place|placing)\s+([a-z0-9-]+)/)
+  if (!seatMatch) return null
+  if (seatMatch[3] && seatMatch[4]) return `Row ${seatMatch[3].toUpperCase()}, Seat ${seatMatch[4].toUpperCase()}`
+  const seat = seatMatch[1]?.toUpperCase()
+  const row = seatMatch[2]?.toUpperCase()
+  return row ? `Row ${row}, Seat ${seat}` : `Seat ${seat}`
+}
+
+function extractStreetName(command) {
+  const known = knownStreets.find((street) => command.includes(street.toLowerCase()))
+  if (known) return known
+  const match = command.match(/\b(?:street|road|avenue|drive)\s+([a-z][a-z\s]{1,28})|\b([a-z][a-z\s]{1,28})\s+(street|road|avenue|drive)\b/)
+  if (!match) return null
+  const name = match[1] ? `${match[1]} street` : `${match[2]} ${match[3]}`
+  return titleCase(name.trim().replace(/\s+/g, ' '))
+}
+
+function parseDestinationCommand(rawCommand) {
+  const command = rawCommand.toLowerCase().trim()
+  if (!command) return null
+  const grandstandLetter = extractGrandstandLetter(command)
+  if (grandstandLetter) {
+    return { ...destinations.find((item) => item.id === 'grandstand'), id: `grandstand-${grandstandLetter}`, name: `Grandstand ${grandstandLetter}`, detail: 'Lettered grandstand entry · accessible platform' }
+  }
+  const seatPlacement = extractSeatPlacement(command)
+  if (seatPlacement) {
+    return { ...destinations.find((item) => item.id === 'seat'), id: `seat-${seatPlacement.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, name: seatPlacement, detail: 'Seat placing fetched from venue map' }
+  }
+  const streetName = extractStreetName(command)
+  if (streetName) {
+    return { ...destinations.find((item) => item.id === 'street'), id: `street-${streetName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, name: streetName, detail: 'Street-side pickup and exit routing' }
+  }
+  return destinations.find((item) => item.aliases?.some((alias) => command.includes(alias)) || command.includes(item.id)) || null
+}
 
 function speak(text) {
   if (!('speechSynthesis' in window)) return
@@ -38,12 +175,15 @@ function App() {
   const [mode, setMode] = useState(() => localStorage.getItem('paddock-mode') || 'lowVision')
   const [screen, setScreen] = useState('navigate')
   const [selected, setSelected] = useState(null)
+  const [customDestination, setCustomDestination] = useState(null)
+  const [pendingNavigation, setPendingNavigation] = useState(false)
   const [prefs, setPrefs] = useState({ crowds: true, quiet: false, stairs: true })
   const [listening, setListening] = useState(false)
   const [navigating, setNavigating] = useState(false)
   const [paused, setPaused] = useState(false)
   const [step, setStep] = useState(0)
   const [hazard, setHazard] = useState(false)
+  const [rerouteInstructions, setRerouteInstructions] = useState(null)
   const [offline, setOffline] = useState(false)
   const [toast, setToast] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -52,11 +192,16 @@ function App() {
   const [navigationSpeech, setNavigationSpeech] = useState(() => localStorage.getItem('paddock-navigation-speech') !== 'false')
   const [voiceTranscript, setVoiceTranscript] = useState('')
   const [voiceError, setVoiceError] = useState('')
+  const [gpsState, setGpsState] = useState({ status: 'idle', accuracy: null, latitude: null, longitude: null, simulated: true })
   const timer = useRef(null)
   const recognitionRef = useRef(null)
+  const gpsWatchRef = useRef(null)
+  const simulatedGpsTimerRef = useRef(null)
 
-  const destination = destinations.find((d) => d.id === selected)
-  const remaining = Math.max(52, 318 - step * 82)
+  const destination = customDestination || destinations.find((d) => d.id === selected)
+  const routeInstructions = rerouteInstructions || routeTemplates[destination?.routeType || destination?.id] || baseInstructions
+  const totalDistance = Number.parseInt(destination?.distance, 10) || 318
+  const remaining = Math.max(52, totalDistance - step * Math.round(totalDistance / routeInstructions.length))
   const progress = navigating ? Math.min(88, 16 + step * 23) : 0
 
   const routeReason = useMemo(() => {
@@ -67,7 +212,10 @@ function App() {
     return reasons.length ? `Avoids ${reasons.join(' and ')}` : 'Balances safety, confidence and distance'
   }, [prefs])
 
-  useEffect(() => () => clearTimeout(timer.current), [])
+  useEffect(() => () => {
+    clearTimeout(timer.current)
+    stopGpsTracking()
+  }, [])
   useEffect(() => localStorage.setItem('paddock-read-telemetry', String(readTelemetry)), [readTelemetry])
   useEffect(() => localStorage.setItem('paddock-navigation-speech', String(navigationSpeech)), [navigationSpeech])
   useEffect(() => localStorage.setItem('paddock-mode', mode), [mode])
@@ -84,34 +232,107 @@ function App() {
 
   function chooseDestination(id) {
     setSelected(id)
+    setCustomDestination(null)
+    setPendingNavigation(false)
+    setRerouteInstructions(null)
+    setHazard(false)
     const item = destinations.find((d) => d.id === id)
     say(`${item.name} selected. ${item.time} away.`)
   }
 
+  function setFetchedDestination(item) {
+    const routeType = destinations.some((destinationItem) => destinationItem.id === item.id) ? item.id : item.id.split('-')[0]
+    const fetchedItem = { ...item, routeType }
+    setSelected(fetchedItem.id)
+    setCustomDestination(fetchedItem)
+    setPendingNavigation(true)
+    setRerouteInstructions(null)
+    setHazard(false)
+    if (item.id === 'bathroom' || item.id === 'exit' || item.id === 'quiet' || item.id === 'medical') setCustomDestination(null)
+    say(`Fetched ${item.name}. ${item.distance} away, approximately ${item.time}. ${item.detail}. Begin navigation?`)
+    notify(`Fetched · ${item.name} · Begin navigation?`)
+  }
+
+  function stopGpsTracking() {
+    if (gpsWatchRef.current !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(gpsWatchRef.current)
+      gpsWatchRef.current = null
+    }
+    clearInterval(simulatedGpsTimerRef.current)
+    simulatedGpsTimerRef.current = null
+  }
+
+  function startGpsTracking() {
+    stopGpsTracking()
+    setGpsState((current) => ({ ...current, status: 'requesting' }))
+    if (navigator.geolocation && window.isSecureContext) {
+      gpsWatchRef.current = navigator.geolocation.watchPosition(
+        (position) => {
+          setGpsState({
+            status: 'live',
+            accuracy: Math.round(position.coords.accuracy),
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            simulated: false,
+          })
+        },
+        () => {
+          setGpsState({ status: 'simulated', accuracy: 7, latitude: -37.8497, longitude: 144.968, simulated: true })
+          startSimulatedGps()
+        },
+        { enableHighAccuracy: true, maximumAge: 3000, timeout: 7000 },
+      )
+      return
+    }
+    setGpsState({ status: 'simulated', accuracy: 7, latitude: -37.8497, longitude: 144.968, simulated: true })
+    startSimulatedGps()
+  }
+
+  function startSimulatedGps() {
+    clearInterval(simulatedGpsTimerRef.current)
+    simulatedGpsTimerRef.current = setInterval(() => {
+      setGpsState((current) => ({
+        ...current,
+        status: current.status === 'idle' ? 'simulated' : current.status,
+        latitude: Number(((current.latitude || -37.8497) + 0.00008).toFixed(6)),
+        longitude: Number(((current.longitude || 144.968) + 0.00006).toFixed(6)),
+        accuracy: current.accuracy || 7,
+        simulated: true,
+      }))
+    }, 4500)
+  }
+
   function beginNavigation() {
     if (!destination) return
+    setPendingNavigation(false)
     setNavigating(true)
     setPaused(false)
     setStep(0)
     setHazard(false)
-    say(`${destination.name} is approximately ${destination.time} away. ${routeReason}. Start forward for 35 metres.`)
+    setRerouteInstructions(null)
+    startGpsTracking()
+    const firstInstruction = routeInstructions[0]
+    say(`${destination.name} is approximately ${destination.time} away. ${routeReason}. GPS movement tracking is on. Camera safety monitoring is available below. ${firstInstruction.title}. ${firstInstruction.detail}.`)
   }
 
   function handleVoiceCommand(rawCommand) {
     const command = rawCommand.toLowerCase().trim()
     setVoiceTranscript(rawCommand)
     setVoiceError('')
-    const match = command.includes('toilet') || command.includes('bathroom') ? 'toilet'
-      : command.includes('quiet') ? 'quiet'
-      : command.includes('medical') || command.includes('first aid') ? 'medical'
-      : command.includes('grandstand') || command.includes('viewing') ? 'grandstand'
-      : null
+    if (pendingNavigation && /^(yes|yeah|yep|begin|start|navigate|go|proceed)\b/.test(command)) {
+      beginNavigation()
+      return
+    }
+    if (/(cancel|stop|not now|no)\b/.test(command) && pendingNavigation) {
+      setPendingNavigation(false)
+      say('Navigation cancelled. Destination remains selected.')
+      notify('Navigation cancelled')
+      return
+    }
+    const match = parseDestinationCommand(rawCommand)
     if (match) {
-      const item = destinations.find((destinationItem) => destinationItem.id === match)
-      setSelected(match)
       if (command.includes('avoid crowd')) setPrefs((current) => ({ ...current, crowds: true }))
-      say(`The nearest ${item.name} is ${item.distance} away, approximately ${item.time}. ${item.detail}.`)
-      notify(`Found · ${item.name} · ${item.time}`)
+      setFetchedDestination(match)
       return
     }
     if (command.includes('where am i')) {
@@ -120,11 +341,11 @@ function App() {
       return
     }
     if (command.includes('repeat')) {
-      say(navigating ? `${instructions[step].title}. ${instructions[step].detail}.` : 'No active navigation instruction.')
+      say(navigating ? `${routeInstructions[step].title}. ${routeInstructions[step].detail}.` : pendingNavigation ? `Fetched ${destination.name}. Begin navigation?` : 'No active navigation instruction.')
       return
     }
-    setVoiceError('Try asking for the nearest toilet, quiet area, medical station or grandstand.')
-    say('I did not recognise that destination. Ask for the nearest toilet, quiet area, medical station or grandstand.')
+    setVoiceError('Try: grandstand C, seat row H 14, nearest exit, bathroom or Fitzroy Street.')
+    say('I did not recognise that destination. Try grandstand C, seat row H 14, nearest exit, bathroom or Fitzroy Street.')
   }
 
   async function startVoiceAssistant() {
@@ -182,35 +403,39 @@ function App() {
 
   function advance() {
     if (paused) return
-    if (step >= instructions.length - 1) {
+    if (step >= routeInstructions.length - 1) {
       setNavigating(false)
       setStep(0)
-      say('You have arrived at the accessible toilet. The entrance is on your left.')
+      stopGpsTracking()
+      say(`You have arrived at ${destination.name}.`)
       notify('Destination reached')
       return
     }
     const next = step + 1
     setStep(next)
-    say(`${instructions[next].title}. ${instructions[next].detail}.`)
+    say(`${routeInstructions[next].title}. ${routeInstructions[next].detail}.`)
   }
 
   function triggerHazard(reason = 'temporary barrier') {
+    const hazardReason = typeof reason === 'string' ? reason : 'temporary barrier'
+    const updatedInstructions = buildRerouteInstructions(destination, routeInstructions, step, hazardReason)
     setHazard(true)
-    setStep(1)
-    say(`Possible ${reason} ahead. Stop. Rerouting. Turn left in six metres. The alternative adds about one minute.`)
-    notify(`Route updated · ${reason} avoided`)
+    setRerouteInstructions(updatedInstructions)
+    setStep(step)
+    say(`Possible ${hazardReason} ahead. Stop. Rerouting. Turn left in six metres. The alternative adds about one minute.`)
+    notify(`Route updated · ${hazardReason} avoided`)
   }
 
   if (!signedIn) return <SignInFlow onComplete={(selectedMode) => { setMode(selectedMode); setSignedIn(true); localStorage.setItem('paddock-signed-in', 'true'); localStorage.setItem('paddock-mode', selectedMode) }} />
 
-  const lowVisionHome = mode === 'lowVision' && screen === 'navigate'
+  const lowVisionHome = mode === 'lowVision' && screen === 'navigate' && !navigating
   const content = screen === 'operator'
     ? <OperatorView readTelemetry={readTelemetry} onBack={() => setScreen('navigate')} />
-    : lowVisionHome
-      ? <LowVisionPilot listening={listening} transcript={voiceTranscript} error={voiceError} speechEnabled={navigationSpeech} onListen={startVoiceAssistant} onSettings={() => setSettingsOpen(true)} onHazard={triggerHazard} />
     : navigating
-      ? <JourneyView mode={mode} speechEnabled={navigationSpeech} destination={destination} step={step} remaining={remaining} progress={progress} paused={paused} hazard={hazard} offline={offline} routeReason={routeReason} readTelemetry={readTelemetry} onPause={() => { setPaused(!paused); say(paused ? 'Navigation resumed.' : 'Navigation paused.') }} onAdvance={advance} onHazard={triggerHazard} onOffline={() => { setOffline(!offline); say(!offline ? 'Network lost. Continuing with cached venue data.' : 'Connection restored.') }} onRepeat={() => say(`${instructions[step].title}. ${instructions[step].detail}.`)} onEnd={() => setNavigating(false)} />
-      : <StartView mode={mode} selected={selected} prefs={prefs} listening={listening} readTelemetry={readTelemetry} onSelect={chooseDestination} onPrefs={setPrefs} onListen={startVoiceAssistant} onStart={beginNavigation} />
+      ? <JourneyView mode={mode} speechEnabled={navigationSpeech} destination={destination} instructions={routeInstructions} step={step} remaining={remaining} progress={progress} paused={paused} hazard={hazard} offline={offline} routeReason={routeReason} readTelemetry={readTelemetry} gpsState={gpsState} onPause={() => { setPaused(!paused); say(paused ? 'Navigation resumed.' : 'Navigation paused.') }} onAdvance={advance} onHazard={triggerHazard} onOffline={() => { setOffline(!offline); say(!offline ? 'Network lost. Continuing with cached venue data.' : 'Connection restored.') }} onRepeat={() => say(`${routeInstructions[step].title}. ${routeInstructions[step].detail}.`)} onEnd={() => { setNavigating(false); stopGpsTracking() }} />
+    : lowVisionHome
+      ? <LowVisionPilot listening={listening} transcript={voiceTranscript} error={voiceError} pendingNavigation={pendingNavigation} destination={destination} speechEnabled={navigationSpeech} onListen={startVoiceAssistant} onStart={beginNavigation} onSettings={() => setSettingsOpen(true)} onHazard={triggerHazard} />
+      : <StartView mode={mode} selected={selected} pendingNavigation={pendingNavigation} selectedDestination={destination} prefs={prefs} listening={listening} readTelemetry={readTelemetry} onSelect={chooseDestination} onPrefs={setPrefs} onListen={startVoiceAssistant} onCommand={handleVoiceCommand} onStart={beginNavigation} />
 
   return (
     <div className={`app-shell ${lowVisionHome ? 'low-vision-shell' : ''}`}>
@@ -253,15 +478,16 @@ function SignInFlow({ onComplete }) {
   </main>
 }
 
-function LowVisionPilot({ listening, transcript, error, speechEnabled, onListen, onSettings, onHazard }) {
+function LowVisionPilot({ listening, transcript, error, pendingNavigation, destination, speechEnabled, onListen, onStart, onSettings, onHazard }) {
   return <div className="low-vision-pilot">
     <section className={`assistant-zone ${listening ? 'listening' : ''}`} aria-labelledby="assistant-zone-title">
       <button className="low-vision-settings" onClick={onSettings} aria-label="Open accessibility settings"><Settings2/></button>
       <button className="assistant-hero-button" onClick={onListen} aria-pressed={listening}>
         <span className="assistant-mic"><Mic/></span>
         <span id="assistant-zone-title">{listening ? 'Listening' : 'Ask Paddock Pilot'}</span>
-        <small>{error || (transcript && transcript !== 'I can hear you…' ? `Last heard: ${transcript}` : listening ? 'Say “Where is the nearest…”' : 'Press, then ask where you need to go')}</small>
+        <small>{error || (pendingNavigation && destination ? `Fetched ${destination.name}. Say “begin” or press Begin navigation.` : transcript && transcript !== 'I can hear you…' ? `Last heard: ${transcript}` : listening ? 'Say “grandstand C”, “seat row H 14”, “exit”, “bathroom” or a street name' : 'Press, then ask where you need to go')}</small>
       </button>
+      {pendingNavigation && destination && <button className="begin-navigation-prompt" onClick={onStart}><Navigation/> Begin navigation?</button>}
     </section>
     <CameraScanner minimal speechEnabled={speechEnabled} onHazard={onHazard}/>
   </div>
@@ -303,7 +529,8 @@ function MobileMenu({ screen, onNavigate, onOperator }) {
   </div>
 }
 
-function StartView({ mode, selected, prefs, listening, readTelemetry, onSelect, onPrefs, onListen, onStart }) {
+function StartView({ mode, selected, pendingNavigation, selectedDestination, prefs, listening, readTelemetry, onSelect, onPrefs, onListen, onCommand, onStart }) {
+  const [typedCommand, setTypedCommand] = useState('')
   return <div className="start-layout">
     <section className="hero-panel">
       <div className="eyebrow"><span>LIVE DEMO</span> ALBERT PARK · GATE 1</div>
@@ -314,7 +541,7 @@ function StartView({ mode, selected, prefs, listening, readTelemetry, onSelect, 
         <span><b>{listening ? 'Listening…' : 'Ask Paddock Pilot'}</b><small>{listening ? 'Say your destination' : 'Press to speak'}</small></span>
         {listening && <span className="wave" aria-hidden="true"><i/><i/><i/><i/></span>}
       </button> : <div className="standard-mode-note"><Navigation/><span><b>Standard navigator</b><small>Choose a destination below. Camera and persistent voice controls are off.</small></span></div>}
-      {mode === 'lowVision' && <div className="voice-example"><Volume2 size={18}/><span>Try: “Where is the nearest accessible toilet?”</span></div>}
+      {mode === 'lowVision' && <div className="voice-example"><Volume2 size={18}/><span>Try: “Grandstand C”, “seat row H 14”, “nearest exit”, “bathroom” or “Fitzroy Street”.</span></div>}
     </section>
 
     <section className="destination-panel" aria-labelledby="destinations-heading">
@@ -334,6 +561,12 @@ function StartView({ mode, selected, prefs, listening, readTelemetry, onSelect, 
         })}
       </div>
 
+      <form className="command-fetcher" onSubmit={(event) => { event.preventDefault(); if (typedCommand.trim()) { onCommand(typedCommand); setTypedCommand('') } }}>
+        <Keyboard/>
+        <input value={typedCommand} onChange={(event) => setTypedCommand(event.target.value)} aria-label="Fetch a destination by command" placeholder="Navigate to grandstand C, seat row H 14, exit, bathroom, Fitzroy Street…"/>
+        <button type="submit"><ChevronRight/> Fetch</button>
+      </form>
+
       <div className="preferences">
         <div className="section-heading compact"><div><span className="section-number">02</span><h2>Route preferences</h2></div><span className="auto-saved"><Check size={13}/> Saved automatically</span></div>
         <div className="preference-row">
@@ -344,8 +577,8 @@ function StartView({ mode, selected, prefs, listening, readTelemetry, onSelect, 
       </div>
 
       <button className="primary-action" disabled={!selected} onClick={onStart}>
-        <span><Navigation size={20} fill="currentColor"/> Start guidance</span>
-        <span>{selected ? 'Route ready' : 'Choose a destination'} <ChevronRight size={18}/></span>
+        <span><Navigation size={20} fill="currentColor"/> {pendingNavigation ? 'Begin navigation?' : 'Start guidance'}</span>
+        <span>{selectedDestination ? selectedDestination.name : selected ? 'Route ready' : 'Choose a destination'} <ChevronRight size={18}/></span>
       </button>
     </section>
 
@@ -367,9 +600,10 @@ function Toggle({ icon: Icon, label, note, checked, onChange }) {
   </button>
 }
 
-function JourneyView({ mode, speechEnabled, destination, step, remaining, progress, paused, hazard, offline, routeReason, readTelemetry, onPause, onAdvance, onHazard, onOffline, onRepeat, onEnd }) {
+function JourneyView({ mode, speechEnabled, destination, instructions, step, remaining, progress, paused, hazard, offline, routeReason, readTelemetry, gpsState, onPause, onAdvance, onHazard, onOffline, onRepeat, onEnd }) {
   const current = instructions[step]
   const CurrentIcon = current.icon
+  const gpsLabel = gpsState.status === 'live' ? `GPS live · ${gpsState.accuracy} m` : gpsState.status === 'requesting' ? 'GPS requesting permission' : gpsState.status === 'simulated' ? 'GPS simulated · demo route' : 'GPS standby'
   return <div className="journey-page">
     <div className="journey-header">
       <button className="back-button" onClick={onEnd}><ArrowLeft size={18}/> End guidance</button>
@@ -394,6 +628,11 @@ function JourneyView({ mode, speechEnabled, destination, step, remaining, progre
       <div className="metric right"><small>Estimated</small><b>{Math.max(1, 5 - step)} min</b></div>
     </section>
 
+    <section className="movement-strip" aria-label="GPS and camera monitoring">
+      <div><MapPin/><span><b>{gpsLabel}</b><small>{gpsState.latitude && gpsState.longitude ? `${gpsState.latitude.toFixed(5)}, ${gpsState.longitude.toFixed(5)}` : 'Movement tracking starts with navigation'}</small></span></div>
+      <div><Camera/><span><b>Camera safety monitor</b><small>{mode === 'lowVision' ? 'Rear camera scanner available below' : 'Low-vision mode can enable camera hazard scanning'}</small></span></div>
+    </section>
+
     <div className="journey-grid">
       <section className="route-story">
         <div className="card-label"><Route/> YOUR ROUTE</div>
@@ -409,7 +648,7 @@ function JourneyView({ mode, speechEnabled, destination, step, remaining, progre
         <div className="card-label"><Gauge/> DEMO CONTROLS</div>
         <p>Simulate live venue conditions and verify safety behaviour.</p>
         <button onClick={onAdvance}><Play/> Advance journey<span>Next GPS point</span></button>
-        <button className="danger-control" onClick={onHazard}><TriangleAlert/> Detect barrier<span>Trigger reroute</span></button>
+        <button className="danger-control" onClick={() => onHazard()}><TriangleAlert/> Detect barrier<span>Trigger reroute</span></button>
         <button onClick={onOffline}>{offline ? <Wifi/> : <WifiOff/>}{offline ? 'Restore connection' : 'Lose connection'}<span>{offline ? 'Resume live data' : 'Use venue cache'}</span></button>
       </section>
     </div>
@@ -720,6 +959,16 @@ const telemetryEvents = [
   { type: 'Session', title: 'Track status clear', detail: 'Green flag conditions restored', time: '14:42:57', tone: 'green', icon: Zap },
 ]
 
+const driverNames = {
+  NOR: 'Lando Norris',
+  PIA: 'Oscar Piastri',
+  LEC: 'Charles Leclerc',
+}
+
+function expandDriverNames(text) {
+  return text.replace(/\b(NOR|PIA|LEC)\b/g, (code) => driverNames[code] || code)
+}
+
 function TelemetryFeed({ compact = false, navigationPriority = false, operator = false, readAloud = false }) {
   const [running, setRunning] = useState(true)
   const [elapsed, setElapsed] = useState(418)
@@ -738,7 +987,9 @@ function TelemetryFeed({ compact = false, navigationPriority = false, operator =
     if (!running || !readAloud) return
     const event = telemetryEvents[activeEvent]
     if ('speechSynthesis' in window && !window.speechSynthesis.speaking) {
-      const update = new SpeechSynthesisUtterance(`${event.type} update. ${event.title}. ${event.detail}.`)
+      const spokenTitle = expandDriverNames(event.spokenTitle || event.title)
+      const spokenDetail = expandDriverNames(event.spokenDetail || event.detail)
+      const update = new SpeechSynthesisUtterance(`${event.type} update. ${spokenTitle}. ${spokenDetail}.`)
       update.rate = 0.96
       update.pitch = 0.92
       window.speechSynthesis.speak(update)

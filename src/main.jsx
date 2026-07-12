@@ -497,8 +497,15 @@ function App() {
     setRerouteInstructions(updatedInstructions)
     setStep(step)
     if (navigationSpeech) {
+      const rerouteResponses = [
+        `${hazardReason} confirmed. Rerouting now. Turn left in six metres. The safer route adds about one minute.`,
+        `Route changed to avoid the ${hazardReason}. Keep straight for four metres, then turn left.`,
+        `A safer path is ready. Move left when clear, then follow the next direction.`,
+        `${hazardReason} ahead. Your route now diverts left and rejoins near the next checkpoint.`,
+      ]
+      const rerouteMessage = rerouteResponses[Math.floor(Math.random() * rerouteResponses.length)]
       speechService.interruptAndSpeak('Stop. Obstacle ahead.').then(() => {
-        speechService.speak(`${hazardReason} detected. Rerouting. Turn left in six metres. The alternative adds about one minute.`, SpeechPriority.ROUTE_UPDATE)
+        speechService.speak(rerouteMessage, SpeechPriority.NAVIGATION)
       })
     }
     notify(`Route updated · ${hazardReason} avoided`)
@@ -749,6 +756,9 @@ function JourneyView({ mode, speechEnabled, destination, instructions, step, rem
 
 function OperatorView({ onBack, readTelemetry }) {
   const [surge, setSurge] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportedCondition, setReportedCondition] = useState('')
+  const reportOptions = ['Congestion', 'Temporary barrier', 'Slippery surface', 'Lift unavailable', 'Excessive noise', 'Accessible route clear']
   return <div className="operator-page">
     <div className="operator-hero">
       <div><div className="eyebrow"><span>OPERATOR</span> LIVE VENUE INTELLIGENCE</div><h1>Albert Park <em>overview</em></h1><p>Privacy-safe signals reveal access friction without exposing individual journeys.</p></div>
@@ -772,6 +782,12 @@ function OperatorView({ onBack, readTelemetry }) {
         <div className="insight"><span><Radar/></span><div><b>Gate 2 surge predicted</b><p>Session ending · opposing pedestrian flows</p></div><em>P2</em></div>
         <div className="insight"><span><Accessibility/></span><div><b>West bridge accessibility debt</b><p>No step-free connection · 410 m detour</p></div><em>P2</em></div>
         <button className="surge-button" onClick={() => setSurge(!surge)}><Radio/> {surge ? 'Clear crowd surge' : 'Session ending crowd surge'}<ChevronRight/></button>
+        <div className="condition-reporter">
+          <button className="report-condition-button" onClick={() => setReportOpen(!reportOpen)} aria-expanded={reportOpen}><TriangleAlert/> Report condition<ChevronRight/></button>
+          {reportOpen && <div className="condition-options" role="group" aria-label="Condition type">{reportOptions.map((condition) => <button key={condition} className={reportedCondition === condition ? 'selected' : ''} onClick={() => setReportedCondition(condition)}>{reportedCondition === condition ? <Check/> : <span/>}{condition}</button>)}</div>}
+          {reportedCondition && <p className="report-confirmation" role="status"><Check/> {reportedCondition} report added.</p>}
+          <small className="trend-training"><Sparkles/> Training for future trends and conditions</small>
+        </div>
       </section>
     </div>
     <section className="activity-card">
@@ -1065,7 +1081,7 @@ function CameraScanner({ minimal = false, promptOnLoad = false, navigationLead =
         persistentHazard(geometryHazard.type, geometryHazard.label, geometryHazard.confidence, geometryHazard.type === 'wall' ? 3 : 4)
       } else {
         persistenceRef.current = { crowd: 0, person: 0, vehicle: 0, object: 0, pole: 0, wall: 0 }
-        if (cameraState === 'active-hazard') setCameraState('active')
+        setCameraState((currentState) => currentState === 'active-hazard' ? 'active' : currentState)
       }
       setFps(Math.max(1, Math.round(1000 / Math.max(1, performance.now() - startedAt))))
     } catch {
@@ -1094,6 +1110,7 @@ function CameraScanner({ minimal = false, promptOnLoad = false, navigationLead =
 
   const active = cameraState === 'active' || cameraState === 'active-hazard' || cameraState === 'detecting'
   const detected = cameraState === 'active-hazard' || cameraState === 'route-hazard'
+  const liveHazard = cameraState === 'active-hazard'
 
   const cameraVisual = <div className="camera-view" aria-label="Forward camera preview">
     <video ref={videoRef} muted playsInline aria-hidden={!active}/>
@@ -1105,7 +1122,10 @@ function CameraScanner({ minimal = false, promptOnLoad = false, navigationLead =
     {!active && navigationLead && <button className="camera-start-overlay" onClick={() => startCamera('environment')} disabled={cameraState === 'requesting'}><Camera/><span><b>{cameraState === 'requesting' ? 'Waiting for permission…' : 'Start rear camera'}</b><small>Tap to enable forward hazard alerts</small></span></button>}
   </div>
 
+  const hazardScreen = liveHazard && <div className="full-screen-hazard" role="alert" aria-live="assertive"><TriangleAlert/><strong>STOP</strong><span>OBSTACLE DETECTED</span><small>Wait until the screen clears before moving</small></div>
+
   if (minimal) return <section className={`vision-zone ${active ? 'active' : ''} ${detected ? 'imminent' : ''}`} aria-labelledby="vision-zone-title">
+    {hazardScreen}
     <h2 id="vision-zone-title" className="sr-only">Forward hazard camera</h2>
     {cameraVisual}
     <div className="vision-controls">
@@ -1117,6 +1137,7 @@ function CameraScanner({ minimal = false, promptOnLoad = false, navigationLead =
   </section>
 
   return <section className={`camera-panel ${navigationLead ? 'navigation-camera-first' : ''} ${active ? 'active' : ''} ${detected ? 'detected' : ''}`} aria-labelledby="camera-title">
+    {hazardScreen}
     <div className="camera-copy">
       <span className="card-label"><Camera/> FORWARD CAMERA</span>
       <h2 id="camera-title">Hazard scan</h2>
@@ -1183,12 +1204,12 @@ function TelemetryFeed({ compact = false, navigationPriority = false, operator =
   }, [running])
 
   useEffect(() => {
-    if (!running || !readAloud) return
+    if (!running || !readAloud || navigationPriority) return
     const event = telemetryEvents[activeEvent]
     const spokenTitle = expandDriverNames(event.spokenTitle || event.title)
     const spokenDetail = expandDriverNames(event.spokenDetail || event.detail)
     speak(`${event.type} update. ${spokenTitle}. ${spokenDetail}.`, SpeechPriority.ENVIRONMENT)
-  }, [activeEvent, readAloud, running])
+  }, [activeEvent, readAloud, running, navigationPriority])
 
   const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0')
   const seconds = (elapsed % 60).toString().padStart(2, '0')

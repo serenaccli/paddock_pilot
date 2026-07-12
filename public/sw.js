@@ -1,4 +1,4 @@
-const CACHE = 'paddock-pilot-offline-v10'
+const CACHE = 'paddock-pilot-offline-v11'
 const CORE = ['./']
 
 self.addEventListener('install', (event) => {

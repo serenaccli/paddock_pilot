@@ -7,10 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "build:pages": "vite build --mode github-pages && cp dist/source/index.html dist/index.html",
-    "publish:branch-pages": "npm run build:pages && cp dist/index.html index.html && cp -R dist/assets .",
+    "publish:branch-pages": "npm run build:pages && cp dist/index.html index.html && cp -R dist/assets . && cp -R dist/piper . && cp dist/sw.js sw.js",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mintplex-labs/piper-tts-web": "^1.0.4",
     "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow/tfjs": "^4.22.0",
     "@vitejs/plugin-react": "latest",

@@ -12,6 +12,7 @@ import './styles.css'
 import { AlbertParkMap } from './components/AlbertParkMap'
 import { destinationFacilityMap, facilityForCommand, venueFacilities } from './data/albertParkVenue'
 import { applyVoiceRoutingPreference, defaultRoutingPreferences, planVenueRoute } from './routing/venueRouter'
+import { PIPER_VOICES, SpeechPriority, speechService } from './services/SpeechService'
 
 const destinations = [
   { id: 'bathroom', name: 'Accessible bathroom', detail: 'East concourse · open', time: '4 min', distance: '318 m', icon: Accessibility, aliases: ['toilet', 'bathroom', 'restroom', 'loo'] },
@@ -164,14 +165,7 @@ function parseDestinationCommand(rawCommand) {
   return destinations.find((item) => item.aliases?.some((alias) => command.includes(alias)) || command.includes(item.id)) || null
 }
 
-function speak(text) {
-  if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.rate = 0.96
-  utterance.pitch = 0.92
-  window.speechSynthesis.speak(utterance)
-}
+const speak = (text, priority = SpeechPriority.ASSISTANT) => speechService.speak(text, priority)
 
 function App() {
   const [signedIn, setSignedIn] = useState(() => localStorage.getItem('paddock-signed-in') === 'true')
@@ -222,12 +216,16 @@ function App() {
     clearTimeout(timer.current)
     stopGpsTracking()
   }, [])
+  useEffect(() => {
+    speechService.initialize()
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {})
+  }, [])
   useEffect(() => localStorage.setItem('paddock-read-telemetry', String(readTelemetry)), [readTelemetry])
   useEffect(() => localStorage.setItem('paddock-navigation-speech', String(navigationSpeech)), [navigationSpeech])
   useEffect(() => localStorage.setItem('paddock-mode', mode), [mode])
 
-  function say(text) {
-    if (navigationSpeech) speak(text)
+  function say(text, priority = SpeechPriority.ASSISTANT) {
+    if (navigationSpeech) speak(text, priority)
   }
 
   function notify(message) {
@@ -339,7 +337,7 @@ function App() {
     setRerouteInstructions(null)
     startGpsTracking()
     const firstInstruction = routeInstructions[0]
-    say(`${destination.name} is approximately ${destination.time} away. ${routeReason}. GPS movement tracking is on. Camera safety monitoring is available below. ${firstInstruction.title}. ${firstInstruction.detail}.`)
+    say(`${destination.name} is approximately ${destination.time} away. ${routeReason}. GPS movement tracking is on. Camera safety monitoring is available below. ${firstInstruction.title}. ${firstInstruction.detail}.`, SpeechPriority.NAVIGATION)
   }
 
   function handleVoiceCommand(rawCommand) {
@@ -448,7 +446,7 @@ function App() {
       recognition.continuous = false
       recognition.maxAlternatives = 1
       recognitionRef.current = recognition
-      recognition.onstart = () => { setListening(true); setVoiceError(''); window.speechSynthesis?.cancel() }
+      recognition.onstart = () => { setListening(true); setVoiceError(''); speechService.stop() }
       recognition.onspeechstart = () => setVoiceTranscript('I can hear you…')
       recognition.onresult = (event) => handleVoiceCommand(event.results[0][0].transcript)
       recognition.onnomatch = () => {
@@ -489,7 +487,7 @@ function App() {
     }
     const next = step + 1
     setStep(next)
-    say(`${routeInstructions[next].title}. ${routeInstructions[next].detail}.`)
+      say(`${routeInstructions[next].title}. ${routeInstructions[next].detail}.`, SpeechPriority.NAVIGATION)
   }
 
   function triggerHazard(reason = 'temporary barrier') {
@@ -498,7 +496,11 @@ function App() {
     setHazard(true)
     setRerouteInstructions(updatedInstructions)
     setStep(step)
-    say(`Possible ${hazardReason} ahead. Stop. Rerouting. Turn left in six metres. The alternative adds about one minute.`)
+    if (navigationSpeech) {
+      speechService.interruptAndSpeak('Stop. Obstacle ahead.').then(() => {
+        speechService.speak(`${hazardReason} detected. Rerouting. Turn left in six metres. The alternative adds about one minute.`, SpeechPriority.ROUTE_UPDATE)
+      })
+    }
     notify(`Route updated · ${hazardReason} avoided`)
   }
 
@@ -519,7 +521,7 @@ function App() {
       {!lowVisionHome && menuOpen && <MobileMenu screen={screen} onNavigate={() => { setScreen('navigate'); setMenuOpen(false) }} onOperator={() => { setScreen('operator'); setMenuOpen(false) }} />}
       <main id="main">{content}</main>
       <ModeToggle mode={mode} onChange={(nextMode) => { setMode(nextMode); say(nextMode === 'lowVision' ? 'Low-vision assistance on.' : 'Low-vision assistance off. Standard voice navigation remains available.') }}/>
-      {settingsOpen && <SettingsDialog mode={mode} navigationSpeech={navigationSpeech} readTelemetry={readTelemetry} onMode={setMode} onNavigationSpeech={(value) => { setNavigationSpeech(value); if (value) speak('Navigation text to speech on.') }} onReadTelemetry={(value) => { setReadTelemetry(value); if (navigationSpeech) speak(value ? 'Race updates will be read aloud.' : 'Spoken race updates off.') }} onSignOut={() => { localStorage.removeItem('paddock-signed-in'); setSignedIn(false); setSettingsOpen(false) }} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsDialog mode={mode} navigationSpeech={navigationSpeech} readTelemetry={readTelemetry} onMode={setMode} onNavigationSpeech={(value) => { setNavigationSpeech(value); if (value) speak('Navigation text to speech on.') }} onReadTelemetry={(value) => { setReadTelemetry(value); if (navigationSpeech) speak(value ? 'Race updates will be read aloud.' : 'Spoken race updates off.') }} onSignOut={() => { speechService.stop(); localStorage.removeItem('paddock-signed-in'); setSignedIn(false); setSettingsOpen(false) }} onClose={() => setSettingsOpen(false)} />}
       {toast && <div className="toast" role="status"><Check size={18} aria-hidden="true" />{toast}</div>}
     </div>
   )
@@ -783,11 +785,31 @@ function OperatorView({ onBack, readTelemetry }) {
 }
 
 function SettingsDialog({ mode, navigationSpeech, readTelemetry, onMode, onNavigationSpeech, onReadTelemetry, onSignOut, onClose }) {
+  const [speechState, setSpeechState] = useState(() => speechService.snapshot())
+  const [downloading, setDownloading] = useState(null)
+  const [downloadProgress, setDownloadProgress] = useState(0)
+  const [speechError, setSpeechError] = useState('')
+
   useEffect(() => {
     const closeOnEscape = (event) => event.key === 'Escape' && onClose()
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [onClose])
+  useEffect(() => speechService.subscribe(setSpeechState), [])
+
+  async function installVoice(voiceId) {
+    setDownloading(voiceId)
+    setDownloadProgress(0)
+    setSpeechError('')
+    try {
+      await speechService.downloadVoice(voiceId, setDownloadProgress)
+      speak('Piper voice installed and ready.', SpeechPriority.ASSISTANT)
+    } catch {
+      setSpeechError('Voice download failed. Check the connection and try again.')
+    } finally {
+      setDownloading(null)
+    }
+  }
 
   return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -807,6 +829,24 @@ function SettingsDialog({ mode, navigationSpeech, readTelemetry, onMode, onNavig
         <span><b>Read race updates aloud</b><small>Race control, timing, weather and session changes</small></span>
         <span className="large-toggle" aria-hidden="true"><i/></span>
       </button>
+      <section className="speech-settings" aria-labelledby="speech-settings-title">
+        <div className="speech-settings-head"><span><b id="speech-settings-title">Offline Piper voice</b><small>{speechState.piperReady ? 'Piper ready · works offline' : 'Install a voice once to enable offline speech'}</small></span><em className={speechState.piperReady ? 'ready' : ''}>{speechState.engine}</em></div>
+        <label htmlFor="piper-voice">Voice model</label>
+        <select id="piper-voice" value={speechState.voiceId} onChange={(event) => speechService.setVoice(event.target.value)}>
+          {PIPER_VOICES.map((voice) => <option key={voice.id} value={voice.id} disabled={!speechState.installedVoices.includes(voice.id)}>{voice.label}{speechState.installedVoices.includes(voice.id) ? ' · installed' : ' · download required'}</option>)}
+        </select>
+        <div className="voice-downloads">
+          {PIPER_VOICES.filter((voice) => !speechState.installedVoices.includes(voice.id)).map((voice) => <button key={voice.id} onClick={() => installVoice(voice.id)} disabled={Boolean(downloading)}><span><b>{voice.label}</b><small>{voice.description}</small></span><em>{downloading === voice.id ? `${Math.round(downloadProgress * 100)}%` : 'Download'}</em></button>)}
+          {PIPER_VOICES.every((voice) => speechState.installedVoices.includes(voice.id)) && <p>All recommended voices are installed on this device.</p>}
+        </div>
+        {speechError && <p className="speech-error" role="alert">{speechError}</p>}
+        <div className="speech-sliders">
+          <label>Rate <output>{speechState.rate.toFixed(2)}×</output><input type="range" min="0.75" max="1.35" step="0.05" value={speechState.rate} onChange={(event) => speechService.configure({ rate: event.target.value })}/></label>
+          <label>Pitch <output>{speechState.pitch.toFixed(2)}×</output><input type="range" min="0.7" max="1.4" step="0.05" value={speechState.pitch} onChange={(event) => speechService.configure({ pitch: event.target.value })}/><small>Piper keeps its natural pitch; used by Android/browser fallback.</small></label>
+          <label>Volume <output>{Math.round(speechState.volume * 100)}%</output><input type="range" min="0" max="1" step="0.05" value={speechState.volume} onChange={(event) => speechService.configure({ volume: event.target.value })}/></label>
+        </div>
+        <button className="test-voice" onClick={() => speak('Paddock Pilot voice guidance is ready.', SpeechPriority.NAVIGATION)}><Volume2/> Test selected voice</button>
+      </section>
       <div className="priority-note"><ShieldCheck/><span><b>Safety audio always wins</b><small>Turn guidance, hazards and emergency messages interrupt race updates.</small></span></div>
       <button className="dialog-done" onClick={onClose}>Done</button>
       <button className="sign-out-button" onClick={onSignOut}><LogOut/> Sign out</button>
@@ -871,7 +911,7 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
       setCameraState('active')
       setFacingMode(requestedFacing)
       setMessage(`${requestedFacing === 'environment' ? 'Rear' : 'Front'} camera active. Loading on-device hazard detection.`)
-      if (speechEnabled) speak(`${requestedFacing === 'environment' ? 'Rear' : 'Front'} camera active. Forward hazard scanning is on.`)
+      if (speechEnabled) speak(`${requestedFacing === 'environment' ? 'Rear' : 'Front'} camera active. Forward hazard scanning is on.`, SpeechPriority.ENVIRONMENT)
       try {
         await loadDetector()
         setMessage('Detection active. Analysing the forward route corridor on this device.')
@@ -879,7 +919,7 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
       } catch {
         setModelState('error')
         setMessage('Camera is active, but the detection model could not load. Navigation continues with reduced hazard support.')
-        if (speechEnabled) speak('Camera is active, but object detection is unavailable.')
+        if (speechEnabled) speak('Camera is active, but object detection is unavailable.', SpeechPriority.ROUTE_UPDATE)
       }
     } catch {
       setCameraState('blocked')
@@ -894,7 +934,7 @@ function CameraScanner({ minimal = false, speechEnabled, onHazard }) {
     setDetections([])
     setFps(0)
     setMessage('Camera is off. Navigation continues using location and venue data.')
-    if (speechEnabled) speak('Camera off.')
+    if (speechEnabled) speak('Camera off.', SpeechPriority.ENVIRONMENT)
   }
 
   async function flipCamera() {
@@ -1090,14 +1130,9 @@ function TelemetryFeed({ compact = false, navigationPriority = false, operator =
   useEffect(() => {
     if (!running || !readAloud) return
     const event = telemetryEvents[activeEvent]
-    if ('speechSynthesis' in window && !window.speechSynthesis.speaking) {
-      const spokenTitle = expandDriverNames(event.spokenTitle || event.title)
-      const spokenDetail = expandDriverNames(event.spokenDetail || event.detail)
-      const update = new SpeechSynthesisUtterance(`${event.type} update. ${spokenTitle}. ${spokenDetail}.`)
-      update.rate = 0.96
-      update.pitch = 0.92
-      window.speechSynthesis.speak(update)
-    }
+    const spokenTitle = expandDriverNames(event.spokenTitle || event.title)
+    const spokenDetail = expandDriverNames(event.spokenDetail || event.detail)
+    speak(`${event.type} update. ${spokenTitle}. ${spokenDetail}.`, SpeechPriority.ENVIRONMENT)
   }, [activeEvent, readAloud, running])
 
   const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0')
